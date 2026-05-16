@@ -10,6 +10,11 @@ from agent.loop import run_agent
 
 _TELEGRAM_API = "https://api.telegram.org"
 
+# In-memory conversation history keyed by chat_id.
+# Survives between messages; cleared on server restart (deploys).
+_history: dict[int, list[dict]] = {}
+_MAX_HISTORY_MESSAGES = 20  # 10 exchanges
+
 
 async def _download_file_b64(bot_token: str, file_id: str) -> tuple[str, str]:
     """Download a Telegram file by file_id and return (base64_data, media_type)."""
@@ -57,23 +62,33 @@ async def handle_update(update: dict, session: AsyncSession) -> None:
     if not bot_token:
         return
 
+    history = _history.get(chat_id, [])
+
     try:
         if "photo" in message:
-            # Telegram sends multiple resolutions; use the last (highest res)
             file_id = message["photo"][-1]["file_id"]
             image_b64, media_type = await _download_file_b64(bot_token, file_id)
-            caption = (
+            user_text = (
                 message.get("caption")
                 or "Here's a photo of some food. Please identify the ingredients."
             )
             response_text = await run_agent(
-                caption, session, image_b64=image_b64, media_type=media_type
+                user_text, session, image_b64=image_b64, media_type=media_type,
+                history=history,
             )
         elif "text" in message:
-            response_text = await run_agent(message["text"], session)
+            user_text = message["text"]
+            response_text = await run_agent(user_text, session, history=history)
         else:
             return
     except Exception as exc:  # noqa: BLE001
         response_text = f"Sorry, something went wrong: {exc}"
+    else:
+        # Append this exchange to history and trim to the cap
+        chat_history = _history.setdefault(chat_id, [])
+        chat_history.append({"role": "user", "content": user_text})
+        chat_history.append({"role": "assistant", "content": response_text})
+        if len(chat_history) > _MAX_HISTORY_MESSAGES:
+            _history[chat_id] = chat_history[-_MAX_HISTORY_MESSAGES:]
 
     await send_message(bot_token, chat_id, response_text)

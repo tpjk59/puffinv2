@@ -22,9 +22,12 @@ async def run_agent(
     session: AsyncSession,
     image_b64: str | None = None,
     media_type: str = "image/jpeg",
+    history: list[dict] | None = None,
 ) -> str:
     """Run one conversational turn of the agent and return the final text response.
 
+    history is a list of prior {"role": ..., "content": ...} messages prepended
+    before the current turn so the model has conversational context.
     If image_b64 is provided it is prepended as an image block (photo workflow).
     The loop continues dispatching tools until stop_reason is 'end_turn'.
     """
@@ -41,7 +44,8 @@ async def run_agent(
     else:
         content = user_message
 
-    messages: list[dict] = [{"role": "user", "content": content}]
+    messages: list[dict] = list(history or [])
+    messages.append({"role": "user", "content": content})
 
     while True:
         response = await client.messages.create(
