@@ -1,5 +1,6 @@
 """Telegram webhook handler — parses incoming updates and drives the agent loop."""
 
+import asyncio
 import base64
 import os
 
@@ -35,6 +36,18 @@ async def _download_file_b64(bot_token: str, file_id: str) -> tuple[str, str]:
     return data, media_type
 
 
+async def _keep_typing(bot_token: str, chat_id: int) -> None:
+    """Send typing action every 4 seconds until cancelled."""
+    url = f"{_TELEGRAM_API}/bot{bot_token}/sendChatAction"
+    while True:
+        try:
+            async with httpx.AsyncClient(timeout=5.0) as client:
+                await client.post(url, json={"chat_id": chat_id, "action": "typing"})
+        except Exception:
+            pass
+        await asyncio.sleep(4)
+
+
 async def send_message(bot_token: str, chat_id: int | str, text: str) -> None:
     """Send a text message to a Telegram chat."""
     url = f"{_TELEGRAM_API}/bot{bot_token}/sendMessage"
@@ -63,7 +76,10 @@ async def handle_update(update: dict, session: AsyncSession) -> None:
         return
 
     history = _history.get(chat_id, [])
+    typing_task = asyncio.create_task(_keep_typing(bot_token, chat_id))
 
+    user_text = ""
+    response_text = ""
     try:
         if "photo" in message:
             file_id = message["photo"][-1]["file_id"]
@@ -80,15 +96,19 @@ async def handle_update(update: dict, session: AsyncSession) -> None:
             user_text = message["text"]
             response_text = await run_agent(user_text, session, history=history)
         else:
+            typing_task.cancel()
             return
     except Exception as exc:  # noqa: BLE001
         response_text = f"Sorry, something went wrong: {exc}"
-    else:
-        # Append this exchange to history and trim to the cap
+    finally:
+        typing_task.cancel()
+
+    if user_text and response_text:
         chat_history = _history.setdefault(chat_id, [])
         chat_history.append({"role": "user", "content": user_text})
         chat_history.append({"role": "assistant", "content": response_text})
         if len(chat_history) > _MAX_HISTORY_MESSAGES:
             _history[chat_id] = chat_history[-_MAX_HISTORY_MESSAGES:]
 
-    await send_message(bot_token, chat_id, response_text)
+    if response_text:
+        await send_message(bot_token, chat_id, response_text)
