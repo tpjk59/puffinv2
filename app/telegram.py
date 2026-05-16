@@ -2,7 +2,9 @@
 
 import asyncio
 import base64
+import logging
 import os
+import traceback
 
 import httpx
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -10,6 +12,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from agent.loop import run_agent
 
 _TELEGRAM_API = "https://api.telegram.org"
+_log = logging.getLogger(__name__)
 
 # In-memory conversation history keyed by chat_id.
 # Survives between messages; cleared on server restart (deploys).
@@ -49,15 +52,20 @@ async def _keep_typing(bot_token: str, chat_id: int) -> None:
 
 
 async def send_message(bot_token: str, chat_id: int | str, text: str) -> None:
-    """Send a text message to a Telegram chat."""
+    """Send a text message to a Telegram chat.
+
+    Tries Markdown first; falls back to plain text if Telegram rejects it.
+    """
     url = f"{_TELEGRAM_API}/bot{bot_token}/sendMessage"
-    # Telegram has a 4096-char limit per message
     for chunk in _chunk(text, 4096):
         async with httpx.AsyncClient(timeout=15.0) as client:
-            await client.post(
+            r = await client.post(
                 url,
                 json={"chat_id": chat_id, "text": chunk, "parse_mode": "Markdown"},
             )
+            if r.status_code != 200:
+                _log.warning("Markdown send failed (%s): %s — retrying as plain text", r.status_code, r.text)
+                await client.post(url, json={"chat_id": chat_id, "text": chunk})
 
 
 def _chunk(text: str, size: int) -> list[str]:
@@ -88,20 +96,25 @@ async def handle_update(update: dict, session: AsyncSession) -> None:
                 message.get("caption")
                 or "Here's a photo of some food. Please identify the ingredients."
             )
+            _log.info("photo message from chat %s (caption: %s)", chat_id, user_text[:80])
             response_text = await run_agent(
                 user_text, session, image_b64=image_b64, media_type=media_type,
                 history=history,
             )
         elif "text" in message:
             user_text = message["text"]
+            _log.info("text message from chat %s: %s", chat_id, user_text[:120])
             response_text = await run_agent(user_text, session, history=history)
         else:
             typing_task.cancel()
             return
     except Exception as exc:  # noqa: BLE001
+        _log.error("agent error for chat %s:\n%s", chat_id, traceback.format_exc())
         response_text = f"Sorry, something went wrong: {exc}"
     finally:
         typing_task.cancel()
+
+    _log.info("agent response for chat %s: %s", chat_id, response_text[:120])
 
     if user_text and response_text:
         chat_history = _history.setdefault(chat_id, [])

@@ -1,7 +1,10 @@
 """FastAPI application — webhook, REST API, and web dashboard."""
 
+import logging
 import os
 from contextlib import asynccontextmanager
+
+logging.basicConfig(level=logging.INFO)
 from pathlib import Path
 from typing import Optional
 
