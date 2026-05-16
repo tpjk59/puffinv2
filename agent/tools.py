@@ -423,8 +423,9 @@ TOOL_DEFINITIONS: list[dict] = [
     {
         "name": "update_inventory",
         "description": (
-            "Add, consume, or expire ingredients. "
-            "action='add': add new stock. "
+            "Add, consume, or expire a single ingredient. "
+            "action='add': add one item — use this for individual additions only. "
+            "For adding multiple ingredients at once, use fetch_from_source instead. "
             "action='consume': reduce quantity after use; removes the item if fully consumed. "
             "action='expire': remove an expired item."
         ),
@@ -573,7 +574,9 @@ TOOL_DEFINITIONS: list[dict] = [
         "description": (
             "Trigger a registered food source to fetch arrivals and save them to inventory. "
             "Use when the user says their veg box or meat box has arrived. "
-            "For the manual source, pass text= describing what arrived."
+            "Also use with source_label='manual' whenever the user provides a list of "
+            "ingredients to add — pass the entire list as text= in one call rather than "
+            "calling update_inventory repeatedly."
         ),
         "input_schema": {
             "type": "object",

@@ -9,7 +9,7 @@ from agent.prompts import SYSTEM_PROMPT
 from agent.tools import TOOL_DEFINITIONS, dispatch_tool
 
 _MODEL = "claude-sonnet-4-6"
-_MAX_TOKENS = 4096
+_MAX_TOKENS = 8192
 
 # System prompt is cached as an ephemeral prefix — saved on every subsequent turn.
 _SYSTEM_CACHED = [
