@@ -46,6 +46,8 @@ async def _keep_typing(bot_token: str, chat_id: int) -> None:
         try:
             async with httpx.AsyncClient(timeout=5.0) as client:
                 await client.post(url, json={"chat_id": chat_id, "action": "typing"})
+        except asyncio.CancelledError:
+            raise
         except Exception:
             pass
         await asyncio.sleep(4)

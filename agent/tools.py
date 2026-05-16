@@ -620,7 +620,9 @@ TOOL_DEFINITIONS: list[dict] = [
         "name": "inventory_from_image",
         "description": (
             "Identify ingredients in a photo. Returns candidates — does NOT save to inventory. "
-            "Present candidates to the user, then call update_inventory for confirmed items."
+            "Show the candidate list to the user. Once confirmed, save everything in one call "
+            "using fetch_from_source(source_label='manual', text=<comma-separated list>) "
+            "rather than calling update_inventory per item."
         ),
         "input_schema": {
             "type": "object",

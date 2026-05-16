@@ -60,6 +60,12 @@ async def run_agent(
             text_blocks = [b for b in response.content if b.type == "text"]
             return text_blocks[0].text if text_blocks else "(no response)"
 
+        if response.stop_reason == "max_tokens":
+            return (
+                "Sorry, that request was too large for me to complete in one go. "
+                "Try breaking it into smaller batches — e.g. send half the items at a time."
+            )
+
         if response.stop_reason != "tool_use":
             return f"Unexpected stop reason: {response.stop_reason}"
 
