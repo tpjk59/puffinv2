@@ -471,6 +471,196 @@ async def test_get_delivery_schedule_with_data(db_session: AsyncSession) -> None
     assert result["schedules"][0]["item_count"] == 2
 
 
+# ---------------------------------------------------------------------------
+# Meal plan tools
+# ---------------------------------------------------------------------------
+
+
+async def test_plan_meal_creates_entry(db_session: AsyncSession) -> None:
+    result = await tools.plan_meal(
+        db_session,
+        name="Spaghetti Bolognese",
+        planned_date="2026-05-20",
+        ingredients=[
+            {"name": "beef mince", "quantity": 400, "unit": "g"},
+            {"name": "spaghetti", "quantity": 200, "unit": "g"},
+        ],
+        servings=2,
+        cuisine_tag="italian",
+    )
+    assert result["name"] == "Spaghetti Bolognese"
+    assert result["planned_date"] == "2026-05-20"
+    assert len(result["ingredients"]) == 2
+    assert result["status"] == "planned"
+
+
+async def test_get_meal_plan_availability(db_session: AsyncSession) -> None:
+    await crud.create_ingredient(
+        db_session, name="beef mince", quantity=400, unit="g",
+        source_label="manual", location="fresh", arrived_date=date.today(),
+    )
+    plan = await tools.plan_meal(
+        db_session,
+        name="Bolognese",
+        planned_date="2026-05-20",
+        ingredients=[
+            {"name": "beef mince", "quantity": 400, "unit": "g"},
+            {"name": "spaghetti", "quantity": 200, "unit": "g"},
+        ],
+    )
+    result = await tools.get_meal_plan(db_session)
+    assert len(result["plans"]) == 1
+    ings = {i["name"]: i for i in result["plans"][0]["ingredients"]}
+    assert ings["beef mince"]["in_stock"] is True
+    assert ings["spaghetti"]["in_stock"] is False
+    assert result["plans"][0]["all_in_stock"] is False
+
+
+async def test_get_meal_plan_all_in_stock(db_session: AsyncSession) -> None:
+    await crud.create_ingredient(
+        db_session, name="pasta", quantity=500, unit="g",
+        source_label="manual", location="pantry", arrived_date=date.today(),
+    )
+    await tools.plan_meal(
+        db_session,
+        name="Simple Pasta",
+        planned_date="2026-05-21",
+        ingredients=[{"name": "pasta", "quantity": 200, "unit": "g"}],
+    )
+    result = await tools.get_meal_plan(db_session)
+    assert result["plans"][0]["all_in_stock"] is True
+
+
+async def test_update_meal_plan_changes_date(db_session: AsyncSession) -> None:
+    plan = await tools.plan_meal(
+        db_session, name="Curry", planned_date="2026-05-20",
+        ingredients=[{"name": "chicken", "quantity": 500, "unit": "g"}],
+    )
+    result = await tools.update_meal_plan(
+        db_session, plan_id=plan["id"], planned_date="2026-05-22"
+    )
+    assert result["planned_date"] == "2026-05-22"
+
+
+async def test_update_meal_plan_replaces_ingredients(db_session: AsyncSession) -> None:
+    plan = await tools.plan_meal(
+        db_session, name="Curry", planned_date="2026-05-20",
+        ingredients=[{"name": "chicken", "quantity": 500, "unit": "g"}],
+    )
+    await tools.update_meal_plan(
+        db_session, plan_id=plan["id"],
+        ingredients=[
+            {"name": "tofu", "quantity": 400, "unit": "g"},
+            {"name": "peppers", "quantity": 2, "unit": "whole"},
+        ],
+    )
+    # Fetch via get_meal_plan to see updated ingredients
+    plans = await tools.get_meal_plan(db_session)
+    ings = [i["name"] for i in plans["plans"][0]["ingredients"]]
+    assert "tofu" in ings
+    assert "chicken" not in ings
+
+
+async def test_update_meal_plan_not_found(db_session: AsyncSession) -> None:
+    result = await tools.update_meal_plan(db_session, plan_id=9999, name="Ghost")
+    assert "error" in result
+
+
+async def test_remove_from_meal_plan(db_session: AsyncSession) -> None:
+    plan = await tools.plan_meal(
+        db_session, name="Risotto", planned_date="2026-05-23",
+        ingredients=[{"name": "arborio rice", "quantity": 300, "unit": "g"}],
+    )
+    result = await tools.remove_from_meal_plan(db_session, plan_id=plan["id"])
+    assert result["status"] == "removed"
+    remaining = await tools.get_meal_plan(db_session)
+    assert remaining["plans"] == []
+
+
+async def test_remove_from_meal_plan_not_found(db_session: AsyncSession) -> None:
+    result = await tools.remove_from_meal_plan(db_session, plan_id=9999)
+    assert "error" in result
+
+
+async def test_get_shopping_list_with_gap(db_session: AsyncSession) -> None:
+    await crud.create_ingredient(
+        db_session, name="chicken thighs", quantity=200, unit="g",
+        source_label="manual", location="fresh", arrived_date=date.today(),
+    )
+    await tools.plan_meal(
+        db_session, name="Chicken Curry",
+        planned_date=date.today().isoformat(),
+        ingredients=[{"name": "chicken thighs", "quantity": 600, "unit": "g"}],
+    )
+    result = await tools.get_shopping_list(db_session)
+    assert result["count"] == 1
+    item = result["shopping_list"][0]
+    assert item["name"] == "chicken thighs"
+    assert item["quantity_to_buy"] == 400.0
+    assert item["quantity_in_stock"] == 200.0
+
+
+async def test_get_shopping_list_all_in_stock(db_session: AsyncSession) -> None:
+    await crud.create_ingredient(
+        db_session, name="red lentils", quantity=500, unit="g",
+        source_label="manual", location="pantry", arrived_date=date.today(),
+    )
+    await tools.plan_meal(
+        db_session, name="Dal",
+        planned_date=date.today().isoformat(),
+        ingredients=[{"name": "red lentils", "quantity": 300, "unit": "g"}],
+    )
+    result = await tools.get_shopping_list(db_session)
+    assert result["count"] == 0
+    assert result["shopping_list"] == []
+
+
+async def test_parse_recipe_from_url_success(db_session: AsyncSession) -> None:
+    from unittest.mock import AsyncMock, MagicMock, patch
+
+    mock_response = MagicMock()
+    mock_response.text = "<html><body><h1>Lentil Soup</h1><p>Serves 4. Use 300g red lentils.</p></body></html>"
+    mock_response.raise_for_status = MagicMock()
+
+    recipe_data = {
+        "name": "Lentil Soup", "servings": 4, "cuisine_tag": "british",
+        "ingredients": [{"name": "red lentils", "quantity": 300, "unit": "g"}],
+    }
+    mock_msg = MagicMock()
+    mock_msg.content = [MagicMock()]
+    mock_msg.content[0].text = json.dumps(recipe_data)
+
+    mock_client_inst = MagicMock()
+    mock_client_inst.messages.create = AsyncMock(return_value=mock_msg)
+
+    mock_http_client = AsyncMock()
+    mock_http_client.__aenter__ = AsyncMock(return_value=MagicMock(
+        get=AsyncMock(return_value=mock_response)
+    ))
+    mock_http_client.__aexit__ = AsyncMock(return_value=None)
+
+    with patch("agent.tools._anthropic_client", mock_client_inst), \
+         patch("httpx.AsyncClient", return_value=mock_http_client):
+        result = await tools.parse_recipe_from_url(db_session, url="https://example.com/recipe")
+
+    assert "recipe" in result
+    assert result["recipe"]["name"] == "Lentil Soup"
+    assert result["source_url"] == "https://example.com/recipe"
+
+
+async def test_parse_recipe_from_url_fetch_error(db_session: AsyncSession) -> None:
+    from unittest.mock import patch, AsyncMock
+
+    mock_http_client = AsyncMock()
+    mock_http_client.__aenter__ = AsyncMock(side_effect=Exception("connection refused"))
+    mock_http_client.__aexit__ = AsyncMock(return_value=None)
+
+    with patch("httpx.AsyncClient", return_value=mock_http_client):
+        result = await tools.parse_recipe_from_url(db_session, url="https://bad.example.com")
+
+    assert "error" in result
+
+
 async def test_get_delivery_schedule_filter_by_source(db_session: AsyncSession) -> None:
     from datetime import UTC, datetime
     now = datetime.now(UTC)

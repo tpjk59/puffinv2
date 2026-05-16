@@ -65,6 +65,25 @@ aubergine not eggplant, coriander not cilantro, etc.)
 Return ONLY a valid JSON array with no surrounding text or markdown fences.\
 """
 
+RECIPE_PARSE_PROMPT = """\
+You are parsing a recipe web page into structured data for a British home cook.
+Today's date is {today}.
+
+From the page content below, extract:
+- name: recipe name
+- servings: number of servings as an integer (default 2 if not stated)
+- cuisine_tag: one of british, south-asian, italian, east-asian, middle-eastern, \
+west-african, french, american, other
+- ingredients: list of objects with name, quantity (float), unit, and optional notes \
+(e.g. substitution suggestions). Use British ingredient names \
+(courgette not zucchini, aubergine not eggplant, coriander not cilantro, etc.)
+
+Return ONLY a valid JSON object, no surrounding text or markdown fences.
+
+Page content:
+{content}\
+"""
+
 WEB_SCRAPER_PARSE_PROMPT = """\
 You are parsing the content of a food delivery website to identify incoming ingredients.
 Today's date is {today}. Source: {source_label}.

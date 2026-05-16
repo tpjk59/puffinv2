@@ -6,14 +6,27 @@ dispatch_tool routes a tool_use block to the correct implementation.
 """
 
 import json
+import re
 from datetime import UTC, date, datetime, timedelta
 from typing import Any, Optional
 
+import anthropic
+import httpx
 from sqlalchemy.ext.asyncio import AsyncSession
 
 import sources.registry as registry
+from agent.prompts import RECIPE_PARSE_PROMPT
 from db import crud
 from nutrition.lookup import fetch_nutrition
+
+_anthropic_client = anthropic.AsyncAnthropic()
+_RECIPE_PARSE_MODEL = "claude-haiku-4-5-20251001"
+
+
+def _strip_html(html: str) -> str:
+    html = re.sub(r'<(script|style)[^>]*>.*?</\1>', '', html, flags=re.DOTALL | re.IGNORECASE)
+    html = re.sub(r'<[^>]+>', ' ', html)
+    return re.sub(r'\s+', ' ', html).strip()[:8000]
 
 
 # ---------------------------------------------------------------------------
@@ -36,6 +49,19 @@ def _ingredient_to_dict(ing) -> dict:
         "protein_per_100g": ing.protein_per_100g,
         "fibre_per_100g": ing.fibre_per_100g,
         "notes": ing.notes,
+    }
+
+
+def _meal_plan_to_dict(plan) -> dict:
+    return {
+        "id": plan.id,
+        "name": plan.name,
+        "cuisine_tag": plan.cuisine_tag,
+        "planned_date": plan.planned_date.isoformat(),
+        "servings": plan.servings,
+        "status": plan.status,
+        "source_url": plan.source_url,
+        "notes": plan.notes,
     }
 
 
@@ -373,6 +399,204 @@ async def get_delivery_schedule(
 
 
 # ---------------------------------------------------------------------------
+# Meal plan tools
+# ---------------------------------------------------------------------------
+
+
+async def plan_meal(
+    session: AsyncSession,
+    name: str,
+    planned_date: str,
+    ingredients: list[dict],
+    servings: int = 2,
+    cuisine_tag: Optional[str] = None,
+    source_url: Optional[str] = None,
+    notes: Optional[str] = None,
+) -> dict:
+    plan = await crud.create_meal_plan(
+        session,
+        name=name,
+        planned_date=date.fromisoformat(planned_date),
+        servings=servings,
+        cuisine_tag=cuisine_tag,
+        source_url=source_url,
+        notes=notes,
+    )
+    for item in ingredients:
+        await crud.add_meal_plan_ingredient(
+            session, plan.id,
+            item["name"], float(item["quantity"]), item["unit"],
+            item.get("notes"),
+        )
+    ing_list = await crud.list_meal_plan_ingredients(session, plan.id)
+    result = _meal_plan_to_dict(plan)
+    result["ingredients"] = [
+        {"id": i.id, "name": i.name, "quantity": i.quantity, "unit": i.unit, "notes": i.notes}
+        for i in ing_list
+    ]
+    return result
+
+
+async def get_meal_plan(
+    session: AsyncSession,
+    from_date: Optional[str] = None,
+    to_date: Optional[str] = None,
+    status: Optional[str] = None,
+) -> dict:
+    plans = await crud.list_meal_plans(
+        session,
+        from_date=date.fromisoformat(from_date) if from_date else None,
+        to_date=date.fromisoformat(to_date) if to_date else None,
+        status=status,
+    )
+    all_inventory = await crud.list_ingredients(session)
+    stock: dict[str, float] = {}
+    for ing in all_inventory:
+        stock[ing.name.lower()] = stock.get(ing.name.lower(), 0) + ing.quantity
+
+    result = []
+    for plan in plans:
+        ings = await crud.list_meal_plan_ingredients(session, plan.id)
+        ing_list = []
+        for pi in ings:
+            have = stock.get(pi.name.lower(), 0.0)
+            ing_list.append({
+                "id": pi.id,
+                "name": pi.name,
+                "quantity": pi.quantity,
+                "unit": pi.unit,
+                "notes": pi.notes,
+                "in_stock": have >= pi.quantity,
+                "stock_qty": have,
+            })
+        entry = _meal_plan_to_dict(plan)
+        entry["ingredients"] = ing_list
+        entry["all_in_stock"] = all(i["in_stock"] for i in ing_list) if ing_list else True
+        result.append(entry)
+    return {"plans": result}
+
+
+async def update_meal_plan(
+    session: AsyncSession,
+    plan_id: int,
+    name: Optional[str] = None,
+    planned_date: Optional[str] = None,
+    servings: Optional[int] = None,
+    cuisine_tag: Optional[str] = None,
+    status: Optional[str] = None,
+    source_url: Optional[str] = None,
+    notes: Optional[str] = None,
+    ingredients: Optional[list[dict]] = None,
+) -> dict:
+    updates: dict[str, Any] = {}
+    if name is not None:
+        updates["name"] = name
+    if planned_date is not None:
+        updates["planned_date"] = date.fromisoformat(planned_date)
+    if servings is not None:
+        updates["servings"] = servings
+    if cuisine_tag is not None:
+        updates["cuisine_tag"] = cuisine_tag
+    if status is not None:
+        updates["status"] = status
+    if source_url is not None:
+        updates["source_url"] = source_url
+    if notes is not None:
+        updates["notes"] = notes
+
+    plan = await crud.update_meal_plan(session, plan_id, updates)
+    if plan is None:
+        return {"error": f"Meal plan {plan_id} not found"}
+
+    if ingredients is not None:
+        await crud.replace_meal_plan_ingredients(
+            session, plan_id,
+            [{"name": i["name"], "quantity": float(i["quantity"]), "unit": i["unit"],
+              "notes": i.get("notes")} for i in ingredients],
+        )
+
+    return _meal_plan_to_dict(plan)
+
+
+async def remove_from_meal_plan(session: AsyncSession, plan_id: int) -> dict:
+    deleted = await crud.delete_meal_plan(session, plan_id)
+    if not deleted:
+        return {"error": f"Meal plan {plan_id} not found"}
+    return {"status": "removed", "plan_id": plan_id}
+
+
+async def get_shopping_list(session: AsyncSession) -> dict:
+    today = date.today()
+    plans = await crud.list_meal_plans(session, from_date=today, status="planned")
+
+    needed: dict[tuple, dict] = {}
+    for plan in plans:
+        ings = await crud.list_meal_plan_ingredients(session, plan.id)
+        for pi in ings:
+            key = (pi.name.lower(), pi.unit)
+            if key not in needed:
+                needed[key] = {"name": pi.name, "unit": pi.unit, "quantity_needed": 0.0, "from_plans": []}
+            needed[key]["quantity_needed"] += pi.quantity
+            if plan.name not in needed[key]["from_plans"]:
+                needed[key]["from_plans"].append(plan.name)
+
+    if not needed:
+        return {"shopping_list": [], "message": "No upcoming planned meals."}
+
+    all_inventory = await crud.list_ingredients(session)
+    stock: dict[tuple, float] = {}
+    for ing in all_inventory:
+        k = (ing.name.lower(), ing.unit)
+        stock[k] = stock.get(k, 0) + ing.quantity
+
+    shopping_list = []
+    for key, item in needed.items():
+        have = stock.get(key, 0.0)
+        shortfall = item["quantity_needed"] - have
+        if shortfall > 0:
+            shopping_list.append({
+                "name": item["name"],
+                "quantity_needed": item["quantity_needed"],
+                "quantity_in_stock": round(have, 2),
+                "quantity_to_buy": round(shortfall, 2),
+                "unit": item["unit"],
+                "from_plans": item["from_plans"],
+            })
+
+    return {"shopping_list": shopping_list, "count": len(shopping_list)}
+
+
+async def parse_recipe_from_url(session: AsyncSession, url: str) -> dict:
+    try:
+        async with httpx.AsyncClient(timeout=15.0, follow_redirects=True) as client:
+            r = await client.get(url, headers={"User-Agent": "Mozilla/5.0 (compatible; PuffinBot/1.0)"})
+            r.raise_for_status()
+        page_text = _strip_html(r.text)
+    except Exception as exc:
+        return {"error": f"Could not fetch URL: {exc}"}
+
+    today = date.today().isoformat()
+    prompt = RECIPE_PARSE_PROMPT.format(today=today, content=page_text)
+
+    msg = await _anthropic_client.messages.create(
+        model=_RECIPE_PARSE_MODEL,
+        max_tokens=1024,
+        messages=[{"role": "user", "content": prompt}],
+    )
+    raw = msg.content[0].text.strip()
+    if raw.startswith("```"):
+        lines = raw.splitlines()
+        raw = "\n".join(lines[1:-1] if lines[-1] == "```" else lines[1:])
+
+    try:
+        recipe = json.loads(raw)
+    except json.JSONDecodeError:
+        return {"error": "Could not parse recipe from page", "preview": raw[:200]}
+
+    return {"recipe": recipe, "source_url": url}
+
+
+# ---------------------------------------------------------------------------
 # Dispatch
 # ---------------------------------------------------------------------------
 
@@ -391,6 +615,12 @@ _HANDLERS = {
     "list_sources": list_sources,
     "lookup_nutrition": lookup_nutrition,
     "get_delivery_schedule": get_delivery_schedule,
+    "plan_meal": plan_meal,
+    "get_meal_plan": get_meal_plan,
+    "update_meal_plan": update_meal_plan,
+    "remove_from_meal_plan": remove_from_meal_plan,
+    "get_shopping_list": get_shopping_list,
+    "parse_recipe_from_url": parse_recipe_from_url,
 }
 
 
@@ -675,6 +905,126 @@ TOOL_DEFINITIONS: list[dict] = [
                 },
                 "limit": {"type": "integer", "description": "Defaults to 10."},
             },
+        },
+    },
+    {
+        "name": "plan_meal",
+        "description": (
+            "Add a meal to the plan for a specific date. "
+            "Pass ingredients as a list of {name, quantity, unit}. "
+            "Does NOT touch inventory — planning is separate from cooking."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "name": {"type": "string"},
+                "planned_date": {"type": "string", "description": "ISO date YYYY-MM-DD."},
+                "ingredients": {
+                    "type": "array",
+                    "description": "Ingredient list for this meal.",
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "name": {"type": "string"},
+                            "quantity": {"type": "number"},
+                            "unit": {"type": "string"},
+                            "notes": {"type": "string"},
+                        },
+                        "required": ["name", "quantity", "unit"],
+                    },
+                },
+                "servings": {"type": "integer", "description": "Defaults to 2."},
+                "cuisine_tag": {"type": "string"},
+                "source_url": {"type": "string", "description": "Recipe URL if applicable."},
+                "notes": {"type": "string"},
+            },
+            "required": ["name", "planned_date", "ingredients"],
+        },
+    },
+    {
+        "name": "get_meal_plan",
+        "description": (
+            "View upcoming planned meals with per-ingredient availability vs current inventory. "
+            "Each ingredient has in_stock (bool) and stock_qty. "
+            "Each plan has all_in_stock (bool)."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "from_date": {"type": "string", "description": "ISO date. Omit to get all."},
+                "to_date": {"type": "string", "description": "ISO date."},
+                "status": {
+                    "type": "string",
+                    "enum": ["planned", "cooked", "skipped"],
+                    "description": "Filter by status. Omit to get all.",
+                },
+            },
+        },
+    },
+    {
+        "name": "update_meal_plan",
+        "description": "Update a meal plan entry — change date, name, servings, status, or replace the ingredient list.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "plan_id": {"type": "integer"},
+                "name": {"type": "string"},
+                "planned_date": {"type": "string", "description": "ISO date YYYY-MM-DD."},
+                "servings": {"type": "integer"},
+                "cuisine_tag": {"type": "string"},
+                "status": {"type": "string", "enum": ["planned", "cooked", "skipped"]},
+                "source_url": {"type": "string"},
+                "notes": {"type": "string"},
+                "ingredients": {
+                    "type": "array",
+                    "description": "If provided, replaces the entire ingredient list.",
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "name": {"type": "string"},
+                            "quantity": {"type": "number"},
+                            "unit": {"type": "string"},
+                            "notes": {"type": "string"},
+                        },
+                        "required": ["name", "quantity", "unit"],
+                    },
+                },
+            },
+            "required": ["plan_id"],
+        },
+    },
+    {
+        "name": "remove_from_meal_plan",
+        "description": "Remove a meal from the plan. Does not affect inventory.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "plan_id": {"type": "integer"},
+            },
+            "required": ["plan_id"],
+        },
+    },
+    {
+        "name": "get_shopping_list",
+        "description": (
+            "Generate a shopping list: ingredients needed for upcoming planned meals (status=planned) "
+            "that are not sufficiently in stock. Returns items with quantity_to_buy and which plans need them."
+        ),
+        "input_schema": {"type": "object", "properties": {}},
+    },
+    {
+        "name": "parse_recipe_from_url",
+        "description": (
+            "Fetch a recipe URL and extract name, servings, cuisine_tag, and ingredient list. "
+            "Returns structured data — does NOT add to the meal plan. "
+            "After reviewing with the user, call plan_meal to schedule it."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "url": {"type": "string", "description": "Full URL of the recipe page."},
+            },
+            "required": ["url"],
         },
         "cache_control": {"type": "ephemeral"},  # caches entire tool list as a prefix
     },

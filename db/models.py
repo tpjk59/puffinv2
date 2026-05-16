@@ -93,6 +93,38 @@ class Preference(Base):
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=lambda: datetime.now(UTC))
 
 
+class MealPlan(Base):
+    __tablename__ = "meal_plan"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    name: Mapped[str] = mapped_column(String(255), nullable=False)
+    cuisine_tag: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
+    planned_date: Mapped[date] = mapped_column(Date, nullable=False)
+    servings: Mapped[int] = mapped_column(Integer, nullable=False, default=2)
+    status: Mapped[str] = mapped_column(String(20), nullable=False, default="planned")
+    source_url: Mapped[Optional[str]] = mapped_column(String(500), nullable=True)
+    notes: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+
+    ingredients: Mapped[list["MealPlanIngredient"]] = relationship(
+        "MealPlanIngredient", back_populates="plan", cascade="all, delete-orphan"
+    )
+
+
+class MealPlanIngredient(Base):
+    __tablename__ = "meal_plan_ingredients"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    plan_id: Mapped[int] = mapped_column(
+        ForeignKey("meal_plan.id", ondelete="CASCADE"), nullable=False
+    )
+    name: Mapped[str] = mapped_column(String(255), nullable=False)
+    quantity: Mapped[float] = mapped_column(Float, nullable=False)
+    unit: Mapped[str] = mapped_column(String(50), nullable=False)
+    notes: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+
+    plan: Mapped["MealPlan"] = relationship("MealPlan", back_populates="ingredients")
+
+
 class DeliverySchedule(Base):
     __tablename__ = "delivery_schedule"
 

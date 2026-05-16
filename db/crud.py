@@ -11,6 +11,8 @@ from db.models import (
     Ingredient,
     Meal,
     MealIngredient,
+    MealPlan,
+    MealPlanIngredient,
     NutritionLog,
     Preference,
 )
@@ -317,4 +319,120 @@ async def list_delivery_schedules(
     if source_label is not None:
         query = query.where(DeliverySchedule.source_label == source_label)
     result = await session.execute(query.order_by(DeliverySchedule.expected_date))
+    return list(result.scalars().all())
+
+
+# ---------------------------------------------------------------------------
+# MealPlan
+# ---------------------------------------------------------------------------
+
+
+async def create_meal_plan(
+    session: AsyncSession,
+    name: str,
+    planned_date: date,
+    servings: int = 2,
+    cuisine_tag: Optional[str] = None,
+    source_url: Optional[str] = None,
+    notes: Optional[str] = None,
+) -> MealPlan:
+    plan = MealPlan(
+        name=name,
+        planned_date=planned_date,
+        servings=servings,
+        cuisine_tag=cuisine_tag,
+        source_url=source_url,
+        notes=notes,
+    )
+    session.add(plan)
+    await session.commit()
+    await session.refresh(plan)
+    return plan
+
+
+async def get_meal_plan_entry(session: AsyncSession, plan_id: int) -> Optional[MealPlan]:
+    result = await session.execute(select(MealPlan).where(MealPlan.id == plan_id))
+    return result.scalar_one_or_none()
+
+
+async def list_meal_plans(
+    session: AsyncSession,
+    from_date: Optional[date] = None,
+    to_date: Optional[date] = None,
+    status: Optional[str] = None,
+) -> list[MealPlan]:
+    query = select(MealPlan)
+    if from_date is not None:
+        query = query.where(MealPlan.planned_date >= from_date)
+    if to_date is not None:
+        query = query.where(MealPlan.planned_date <= to_date)
+    if status is not None:
+        query = query.where(MealPlan.status == status)
+    result = await session.execute(query.order_by(MealPlan.planned_date))
+    return list(result.scalars().all())
+
+
+async def update_meal_plan(
+    session: AsyncSession, plan_id: int, updates: dict[str, Any]
+) -> Optional[MealPlan]:
+    plan = await get_meal_plan_entry(session, plan_id)
+    if plan is None:
+        return None
+    for key, value in updates.items():
+        setattr(plan, key, value)
+    await session.commit()
+    await session.refresh(plan)
+    return plan
+
+
+async def delete_meal_plan(session: AsyncSession, plan_id: int) -> bool:
+    plan = await get_meal_plan_entry(session, plan_id)
+    if plan is None:
+        return False
+    await session.delete(plan)
+    await session.commit()
+    return True
+
+
+async def add_meal_plan_ingredient(
+    session: AsyncSession,
+    plan_id: int,
+    name: str,
+    quantity: float,
+    unit: str,
+    notes: Optional[str] = None,
+) -> MealPlanIngredient:
+    ing = MealPlanIngredient(plan_id=plan_id, name=name, quantity=quantity, unit=unit, notes=notes)
+    session.add(ing)
+    await session.commit()
+    await session.refresh(ing)
+    return ing
+
+
+async def replace_meal_plan_ingredients(
+    session: AsyncSession, plan_id: int, ingredients: list[dict]
+) -> list[MealPlanIngredient]:
+    """Delete all existing ingredients for a plan and insert new ones."""
+    existing = await session.execute(
+        select(MealPlanIngredient).where(MealPlanIngredient.plan_id == plan_id)
+    )
+    for ing in existing.scalars().all():
+        await session.delete(ing)
+    await session.commit()
+    result = []
+    for item in ingredients:
+        ing = await add_meal_plan_ingredient(
+            session, plan_id, item["name"], item["quantity"], item["unit"],
+            item.get("notes"),
+        )
+        result.append(ing)
+    return result
+
+
+async def list_meal_plan_ingredients(
+    session: AsyncSession, plan_id: int
+) -> list[MealPlanIngredient]:
+    result = await session.execute(
+        select(MealPlanIngredient).where(MealPlanIngredient.plan_id == plan_id)
+    )
     return list(result.scalars().all())

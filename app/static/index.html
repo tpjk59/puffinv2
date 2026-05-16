@@ -190,6 +190,38 @@
     .delivery-source { font-weight: 500; }
     .delivery-meta   { color: var(--muted); }
 
+    /* ── Meal plan ── */
+    .plan-item {
+      padding: 10px 0;
+      border-bottom: 1px solid var(--border);
+    }
+    .plan-item:last-child { border-bottom: none; }
+    .plan-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-start;
+      gap: 8px;
+      margin-bottom: 4px;
+    }
+    .plan-name { font-weight: 500; }
+    .plan-date { font-size: 13px; color: var(--muted); flex-shrink: 0; }
+    .plan-ings {
+      font-size: 12px;
+      color: var(--muted);
+      display: flex;
+      flex-wrap: wrap;
+      gap: 4px;
+      margin-top: 5px;
+    }
+    .ing-chip {
+      padding: 2px 7px;
+      border-radius: 10px;
+      font-size: 11px;
+      font-weight: 500;
+    }
+    .ing-ok   { background: #d1fae5; color: #065f46; }
+    .ing-miss { background: var(--warn-softer); color: #842029; }
+
     /* ── Empty state ── */
     .empty {
       text-align: center;
@@ -245,6 +277,12 @@
     <div id="meals-content"><div class="loading">Loading...</div></div>
   </div>
 
+  <!-- Meal plan -->
+  <div class="card">
+    <div class="card-title">Meal plan</div>
+    <div id="meal-plan-content"><div class="loading">Loading...</div></div>
+  </div>
+
   <!-- Delivery history -->
   <div class="card">
     <div class="card-title">Delivery history</div>
@@ -269,13 +307,14 @@
   async function loadAll() {
     document.getElementById('refresh-btn').textContent = '...';
     try {
-      const [nutrition, fresh, freezer, pantry, freshMeals, frozenMeals, deliveries] = await Promise.all([
+      const [nutrition, fresh, freezer, pantry, freshMeals, frozenMeals, mealPlan, deliveries] = await Promise.all([
         fetch('/api/nutrition/summary?period=today').then(r => r.json()),
         fetch('/api/inventory?location=fresh').then(r => r.json()),
         fetch('/api/inventory?location=freezer').then(r => r.json()),
         fetch('/api/inventory?location=pantry').then(r => r.json()),
         fetch('/api/meals?location=fresh').then(r => r.json()),
         fetch('/api/meals?location=freezer').then(r => r.json()),
+        fetch('/api/meal-plan').then(r => r.json()),
         fetch('/api/delivery-schedule').then(r => r.json()),
       ]);
       renderNutrition(nutrition);
@@ -284,6 +323,7 @@
       renderPanel('pantry',  pantry.ingredients  || []);
       renderFreshMeals(freshMeals.meals || []);
       renderMeals(frozenMeals.meals || []);
+      renderMealPlan(mealPlan.plans || []);
       renderDeliveries(deliveries.schedules || []);
     } catch (e) {
       console.error(e);
@@ -390,6 +430,42 @@
         </div>
         <span class="meal-portions">${m.portions_remaining}<span style="font-weight:400;color:var(--muted)">/${m.total_portions}</span></span>
       </div>`).join('');
+  }
+
+  function renderMealPlan(plans) {
+    const el = document.getElementById('meal-plan-content');
+    if (!plans.length) {
+      el.innerHTML = '<div class="empty">No meals planned — ask the agent to plan something</div>';
+      return;
+    }
+    const DAYS = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
+    el.innerHTML = plans.map(p => {
+      const d = new Date(p.planned_date + 'T00:00:00');
+      const dayLabel = d.toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short' });
+      const allOk = p.all_in_stock;
+      const statusBadge = p.status !== 'planned'
+        ? `<span class="badge badge-tag">${p.status}</span>` : '';
+      const availBadge = allOk
+        ? '<span class="badge ing-ok">All in stock</span>'
+        : '<span class="badge badge-warn">Missing items</span>';
+      const chips = (p.ingredients || []).map(i =>
+        `<span class="ing-chip ${i.in_stock ? 'ing-ok' : 'ing-miss'}">${i.name}</span>`
+      ).join('');
+      return `<div class="plan-item">
+        <div class="plan-header">
+          <div>
+            <div class="plan-name">${p.name}</div>
+            <div style="display:flex;gap:5px;flex-wrap:wrap;margin-top:3px">
+              ${p.cuisine_tag ? `<span class="badge badge-tag">${p.cuisine_tag}</span>` : ''}
+              ${statusBadge}
+              ${availBadge}
+            </div>
+          </div>
+          <span class="plan-date">${dayLabel}</span>
+        </div>
+        ${chips ? `<div class="plan-ings">${chips}</div>` : ''}
+      </div>`;
+    }).join('');
   }
 
   function renderDeliveries(schedules) {

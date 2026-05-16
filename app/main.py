@@ -92,6 +92,19 @@ async def api_delivery_schedule(source_label: Optional[str] = Query(None)):
         return await get_delivery_schedule(session, source_label=source_label)
 
 
+@app.get("/api/meal-plan")
+async def api_meal_plan(
+    from_date: Optional[str] = Query(None),
+    to_date: Optional[str] = Query(None),
+):
+    from datetime import date
+    from agent.tools import get_meal_plan
+    if from_date is None:
+        from_date = date.today().isoformat()
+    async with AsyncSessionLocal() as session:
+        return await get_meal_plan(session, from_date=from_date, to_date=to_date)
+
+
 # ---------------------------------------------------------------------------
 # Telegram webhook
 # ---------------------------------------------------------------------------
