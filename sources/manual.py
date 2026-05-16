@@ -75,6 +75,7 @@ class ManualSource:
                     source_label=self.source_label,
                     arrived_date=today_date,
                     location=item.get("location", "fresh"),
+                    subcategory=item.get("subcategory"),
                     best_before=best_before,
                     notes=item.get("notes"),
                 )

@@ -24,6 +24,7 @@ class IngredientArrival:
     arrived_date: date
     best_before: date | None = None
     location: str = "fresh"
+    subcategory: str | None = None
     notes: str | None = None
 
 

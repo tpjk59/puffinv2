@@ -358,6 +358,7 @@ async def fetch_from_source(
             unit=arrival.unit,
             source_label=arrival.source_label,
             location=arrival.location,
+            subcategory=arrival.subcategory,
             arrived_date=arrival.arrived_date,
             best_before=arrival.best_before,
             notes=arrival.notes,
