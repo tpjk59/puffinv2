@@ -100,7 +100,11 @@ async def api_delivery_schedule(source_label: Optional[str] = Query(None)):
 @app.post("/webhook/telegram")
 async def telegram_webhook(request: Request) -> Response:
     update = await request.json()
+    # Respond immediately so Telegram doesn't retry on slow agent responses
+    import asyncio
     from app.telegram import handle_update
-    async with AsyncSessionLocal() as session:
-        await handle_update(update, session)
+    async def _process():
+        async with AsyncSessionLocal() as session:
+            await handle_update(update, session)
+    asyncio.create_task(_process())
     return Response(status_code=200)

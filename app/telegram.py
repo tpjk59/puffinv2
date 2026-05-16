@@ -19,6 +19,10 @@ _log = logging.getLogger(__name__)
 _history: dict[int, list[dict]] = {}
 _MAX_HISTORY_MESSAGES = 20  # 10 exchanges
 
+# Seen update_ids — prevents double-processing if Telegram retries a webhook.
+_seen_update_ids: set[int] = set()
+_MAX_SEEN_IDS = 500
+
 
 async def _download_file_b64(bot_token: str, file_id: str) -> tuple[str, str]:
     """Download a Telegram file by file_id and return (base64_data, media_type)."""
@@ -79,6 +83,15 @@ async def handle_update(update: dict, session: AsyncSession) -> None:
     message = update.get("message") or update.get("edited_message")
     if not message:
         return
+
+    update_id: int | None = update.get("update_id")
+    if update_id is not None:
+        if update_id in _seen_update_ids:
+            _log.info("skipping duplicate update_id %s", update_id)
+            return
+        _seen_update_ids.add(update_id)
+        if len(_seen_update_ids) > _MAX_SEEN_IDS:
+            _seen_update_ids.difference_update(set(sorted(_seen_update_ids)[:250]))
 
     chat_id: int = message["chat"]["id"]
     bot_token = os.getenv("TELEGRAM_BOT_TOKEN", "")
