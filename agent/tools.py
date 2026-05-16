@@ -41,14 +41,29 @@ _INGREDIENT_UNIT_TO_BASE: dict[tuple[str, str], tuple[str, float]] = {
 # measures it in a specific amount, treat it as available (container = "I have some").
 _CONTAINER_UNITS = frozenset({"whole", "jar", "bottle", "bag", "box", "packet"})
 
+# Ingredients in these subcategories are tracked by presence only — any stock means
+# available, regardless of quantity. They appear on the shopping list only when fully
+# out of stock (deleted from inventory).
+_STAPLE_SUBCATEGORIES = frozenset({"herb_spice", "condiment"})
 
-def _check_stock(stock: dict[tuple, float], name: str, needed_qty: float, needed_unit: str) -> tuple[bool, float]:
+
+def _check_stock(
+    stock: dict[tuple, float],
+    name: str,
+    needed_qty: float,
+    needed_unit: str,
+    staple_names: frozenset[str] = frozenset(),
+) -> tuple[bool, float]:
     """Return (in_stock, stock_qty).
 
-    Falls back to container-unit check: if the ingredient is stocked as a whole
-    container (jar, bag, etc.) but the recipe measures in tsp/g/ml, treat it as
-    available — the container is assumed to have enough for any recipe amount.
+    Staples (herb_spice / condiment subcategory): any stock = available,
+    quantity is ignored — they only appear on the shopping list when fully gone.
+
+    Otherwise falls back to a container-unit check: if stocked as a whole container
+    (jar, bag, etc.) but the recipe measures in tsp/g/ml, treat as available.
     """
+    if name in staple_names:
+        return True, needed_qty
     have = stock.get((name, needed_unit), 0.0)
     if have >= needed_qty:
         return True, have
@@ -503,6 +518,9 @@ async def get_meal_plan(
     )
     all_inventory = await crud.list_ingredients(session)
     stock: dict[tuple, float] = {}
+    staple_names: frozenset[str] = frozenset(
+        ing.name.lower() for ing in all_inventory if ing.subcategory in _STAPLE_SUBCATEGORIES
+    )
     for ing in all_inventory:
         qty, unit = _normalise(ing.quantity, ing.unit, ing.name)
         key = (ing.name.lower(), unit)
@@ -514,7 +532,7 @@ async def get_meal_plan(
         ing_list = []
         for pi in ings:
             needed_qty, needed_unit = _normalise(pi.quantity, pi.unit, pi.name)
-            in_stock, have = _check_stock(stock, pi.name.lower(), needed_qty, needed_unit)
+            in_stock, have = _check_stock(stock, pi.name.lower(), needed_qty, needed_unit, staple_names)
             ing_list.append({
                 "id": pi.id,
                 "name": pi.name,
@@ -605,6 +623,9 @@ async def get_shopping_list(session: AsyncSession) -> dict:
 
     all_inventory = await crud.list_ingredients(session)
     stock: dict[tuple, float] = {}
+    staple_names: frozenset[str] = frozenset(
+        ing.name.lower() for ing in all_inventory if ing.subcategory in _STAPLE_SUBCATEGORIES
+    )
     for ing in all_inventory:
         qty, unit = _normalise(ing.quantity, ing.unit, ing.name)
         k = (ing.name.lower(), unit)
@@ -613,7 +634,7 @@ async def get_shopping_list(session: AsyncSession) -> dict:
     shopping_list = []
     for key, item in needed.items():
         name, unit = key
-        in_stock, have = _check_stock(stock, name, item["quantity_needed"], unit)
+        in_stock, have = _check_stock(stock, name, item["quantity_needed"], unit, staple_names)
         shortfall = 0.0 if in_stock else item["quantity_needed"] - have
         if shortfall > 0:
             shopping_list.append({
@@ -1008,7 +1029,10 @@ TOOL_DEFINITIONS: list[dict] = [
         "description": (
             "View upcoming planned meals with per-ingredient availability vs current inventory. "
             "Each ingredient has in_stock (bool) and stock_qty. "
-            "Each plan has all_in_stock (bool)."
+            "Each plan has all_in_stock (bool). "
+            "Staple ingredients (subcategory herb_spice or condiment) are checked by presence "
+            "only — any stock = available regardless of recipe quantity. "
+            "Tell the user to say 'I've used the last of X' when a staple runs out."
         ),
         "input_schema": {
             "type": "object",
@@ -1070,7 +1094,8 @@ TOOL_DEFINITIONS: list[dict] = [
         "name": "get_shopping_list",
         "description": (
             "Generate a shopping list: ingredients needed for upcoming planned meals (status=planned) "
-            "that are not sufficiently in stock. Returns items with quantity_to_buy and which plans need them."
+            "that are not sufficiently in stock. Returns items with quantity_to_buy and which plans need them. "
+            "Staples (herb_spice / condiment subcategory) only appear here if completely out of stock."
         ),
         "input_schema": {"type": "object", "properties": {}},
     },

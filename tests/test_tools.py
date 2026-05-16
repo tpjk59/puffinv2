@@ -600,6 +600,52 @@ async def test_get_shopping_list_with_gap(db_session: AsyncSession) -> None:
     assert item["quantity_in_stock"] == 200.0
 
 
+async def test_get_meal_plan_staple_presence_only(db_session: AsyncSession) -> None:
+    # Olive oil stored as 50ml; recipe needs 200ml — should be in-stock because it's a condiment
+    await crud.create_ingredient(
+        db_session, name="olive oil", quantity=50, unit="ml",
+        source_label="manual", location="pantry", arrived_date=date.today(),
+        subcategory="condiment",
+    )
+    await tools.plan_meal(
+        db_session, name="Salad",
+        planned_date=date.today().isoformat(),
+        ingredients=[{"name": "olive oil", "quantity": 200, "unit": "ml"}],
+    )
+    result = await tools.get_meal_plan(db_session)
+    ing = result["plans"][0]["ingredients"][0]
+    assert ing["in_stock"] is True, f"condiment should be available by presence but got: {ing}"
+
+
+async def test_get_shopping_list_staple_not_listed_when_present(db_session: AsyncSession) -> None:
+    # Spice in pantry; recipe needs some — should NOT appear on shopping list
+    await crud.create_ingredient(
+        db_session, name="ground cumin", quantity=1, unit="whole",
+        source_label="manual", location="pantry", arrived_date=date.today(),
+        subcategory="herb_spice",
+    )
+    await tools.plan_meal(
+        db_session, name="Dal",
+        planned_date=date.today().isoformat(),
+        ingredients=[{"name": "ground cumin", "quantity": 2, "unit": "tsp"}],
+    )
+    result = await tools.get_shopping_list(db_session)
+    names = [i["name"] for i in result["shopping_list"]]
+    assert "ground cumin" not in names
+
+
+async def test_get_shopping_list_staple_listed_when_out(db_session: AsyncSession) -> None:
+    # Spice NOT in inventory at all — should appear on shopping list
+    await tools.plan_meal(
+        db_session, name="Dal",
+        planned_date=date.today().isoformat(),
+        ingredients=[{"name": "ground cumin", "quantity": 2, "unit": "tsp"}],
+    )
+    result = await tools.get_shopping_list(db_session)
+    # No inventory entry means it's genuinely missing
+    assert result["count"] == 1
+
+
 async def test_get_meal_plan_container_unit_fallback(db_session: AsyncSession) -> None:
     # Salt stored as "1 whole" (a container); recipe needs "1 tsp" — should show in-stock
     await crud.create_ingredient(
