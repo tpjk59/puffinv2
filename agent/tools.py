@@ -37,6 +37,26 @@ _INGREDIENT_UNIT_TO_BASE: dict[tuple[str, str], tuple[str, float]] = {
     ("garlic", "bulbs"): ("cloves", 12),
 }
 
+# If an ingredient is stocked in one of these "container" units but a recipe
+# measures it in a specific amount, treat it as available (container = "I have some").
+_CONTAINER_UNITS = frozenset({"whole", "jar", "bottle", "bag", "box", "packet"})
+
+
+def _check_stock(stock: dict[tuple, float], name: str, needed_qty: float, needed_unit: str) -> tuple[bool, float]:
+    """Return (in_stock, stock_qty).
+
+    Falls back to container-unit check: if the ingredient is stocked as a whole
+    container (jar, bag, etc.) but the recipe measures in tsp/g/ml, treat it as
+    available — the container is assumed to have enough for any recipe amount.
+    """
+    have = stock.get((name, needed_unit), 0.0)
+    if have >= needed_qty:
+        return True, have
+    for cu in _CONTAINER_UNITS:
+        if stock.get((name, cu), 0) > 0:
+            return True, needed_qty
+    return False, have
+
 
 def _normalise(quantity: float, unit: str, name: str = "") -> tuple[float, str]:
     """Return (quantity, base_unit) with unit normalisation.
@@ -494,14 +514,14 @@ async def get_meal_plan(
         ing_list = []
         for pi in ings:
             needed_qty, needed_unit = _normalise(pi.quantity, pi.unit, pi.name)
-            have = stock.get((pi.name.lower(), needed_unit), 0.0)
+            in_stock, have = _check_stock(stock, pi.name.lower(), needed_qty, needed_unit)
             ing_list.append({
                 "id": pi.id,
                 "name": pi.name,
                 "quantity": pi.quantity,
                 "unit": pi.unit,
                 "notes": pi.notes,
-                "in_stock": have >= needed_qty,
+                "in_stock": in_stock,
                 "stock_qty": round(have, 2),
             })
         entry = _meal_plan_to_dict(plan)
@@ -592,8 +612,9 @@ async def get_shopping_list(session: AsyncSession) -> dict:
 
     shopping_list = []
     for key, item in needed.items():
-        have = stock.get(key, 0.0)
-        shortfall = item["quantity_needed"] - have
+        name, unit = key
+        in_stock, have = _check_stock(stock, name, item["quantity_needed"], unit)
+        shortfall = 0.0 if in_stock else item["quantity_needed"] - have
         if shortfall > 0:
             shopping_list.append({
                 "name": item["name"],

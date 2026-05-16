@@ -600,6 +600,22 @@ async def test_get_shopping_list_with_gap(db_session: AsyncSession) -> None:
     assert item["quantity_in_stock"] == 200.0
 
 
+async def test_get_meal_plan_container_unit_fallback(db_session: AsyncSession) -> None:
+    # Salt stored as "1 whole" (a container); recipe needs "1 tsp" — should show in-stock
+    await crud.create_ingredient(
+        db_session, name="sea salt", quantity=1, unit="whole",
+        source_label="manual", location="pantry", arrived_date=date.today(),
+    )
+    await tools.plan_meal(
+        db_session, name="Test",
+        planned_date=date.today().isoformat(),
+        ingredients=[{"name": "sea salt", "quantity": 1, "unit": "tsp"}],
+    )
+    result = await tools.get_meal_plan(db_session)
+    ing = result["plans"][0]["ingredients"][0]
+    assert ing["in_stock"] is True, f"container of salt should cover 1 tsp but got: {ing}"
+
+
 async def test_get_shopping_list_unit_normalisation(db_session: AsyncSession) -> None:
     # Pantry has 1 kg plain flour; recipe needs 200 g — should show as in-stock
     await crud.create_ingredient(
