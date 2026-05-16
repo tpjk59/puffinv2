@@ -258,17 +258,25 @@ async def fetch_from_source(
     arrivals = await source.fetch(**kwargs)
     created = []
     for arrival in arrivals:
-        ing = await crud.create_ingredient(
-            session,
-            name=arrival.name,
-            quantity=arrival.quantity,
-            unit=arrival.unit,
-            source_label=arrival.source_label,
-            location=arrival.location,
-            arrived_date=arrival.arrived_date,
-            best_before=arrival.best_before,
-            notes=arrival.notes,
+        existing = await crud.find_ingredient_by_name_location_unit(
+            session, arrival.name, arrival.location, arrival.unit
         )
+        if existing:
+            ing = await crud.update_ingredient(
+                session, existing.id, {"quantity": existing.quantity + arrival.quantity}
+            )
+        else:
+            ing = await crud.create_ingredient(
+                session,
+                name=arrival.name,
+                quantity=arrival.quantity,
+                unit=arrival.unit,
+                source_label=arrival.source_label,
+                location=arrival.location,
+                arrived_date=arrival.arrived_date,
+                best_before=arrival.best_before,
+                notes=arrival.notes,
+            )
         created.append(_ingredient_to_dict(ing))
 
     # Record the scrape in delivery_schedule for history / audit

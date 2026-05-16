@@ -65,6 +65,20 @@ async def get_ingredient(session: AsyncSession, ingredient_id: int) -> Optional[
     return result.scalar_one_or_none()
 
 
+async def find_ingredient_by_name_location_unit(
+    session: AsyncSession, name: str, location: str, unit: str
+) -> Optional[Ingredient]:
+    """Case-insensitive lookup for deduplication in fetch_from_source."""
+    result = await session.execute(
+        select(Ingredient).where(
+            Ingredient.name.ilike(name),
+            Ingredient.location == location,
+            Ingredient.unit == unit,
+        )
+    )
+    return result.scalars().first()
+
+
 async def list_ingredients(
     session: AsyncSession,
     location: Optional[str] = None,
