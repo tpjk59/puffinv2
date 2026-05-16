@@ -67,6 +67,8 @@ async def _scrape_source(source_label: str, bot_token: str, chat_id: str) -> Non
 async def _expiry_check(bot_token: str, chat_id: str) -> None:
     await _run_and_send(
         "Check for any ingredients expiring within the next 3 days. "
+        "Also check for cooked meals stored fresh (location='fresh') that were cooked "
+        "3 or more days ago — these should be eaten today or tomorrow. "
         "If anything is at risk, suggest a quick way to use it up. "
         "If nothing is expiring, say so briefly.",
         bot_token,

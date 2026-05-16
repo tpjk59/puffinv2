@@ -233,6 +233,12 @@
     <div id="panel-pantry"  class="tab-panel"><div class="loading">Loading...</div></div>
   </div>
 
+  <!-- Fresh meals / leftovers -->
+  <div class="card">
+    <div class="card-title">Fresh meals</div>
+    <div id="fresh-meals-content"><div class="loading">Loading...</div></div>
+  </div>
+
   <!-- Freezer meals -->
   <div class="card">
     <div class="card-title">Freezer meals</div>
@@ -263,11 +269,12 @@
   async function loadAll() {
     document.getElementById('refresh-btn').textContent = '...';
     try {
-      const [nutrition, fresh, freezer, pantry, meals, deliveries] = await Promise.all([
+      const [nutrition, fresh, freezer, pantry, freshMeals, frozenMeals, deliveries] = await Promise.all([
         fetch('/api/nutrition/summary?period=today').then(r => r.json()),
         fetch('/api/inventory?location=fresh').then(r => r.json()),
         fetch('/api/inventory?location=freezer').then(r => r.json()),
         fetch('/api/inventory?location=pantry').then(r => r.json()),
+        fetch('/api/meals?location=fresh').then(r => r.json()),
         fetch('/api/meals?location=freezer').then(r => r.json()),
         fetch('/api/delivery-schedule').then(r => r.json()),
       ]);
@@ -275,7 +282,8 @@
       renderPanel('fresh',   fresh.ingredients   || []);
       renderPanel('freezer', freezer.ingredients || []);
       renderPanel('pantry',  pantry.ingredients  || []);
-      renderMeals(meals.meals || []);
+      renderFreshMeals(freshMeals.meals || []);
+      renderMeals(frozenMeals.meals || []);
       renderDeliveries(deliveries.schedules || []);
     } catch (e) {
       console.error(e);
@@ -341,6 +349,31 @@
         <span class="item-qty">${qty}${item.unit}</span>
       </span>
     </li>`;
+  }
+
+  function renderFreshMeals(meals) {
+    const el = document.getElementById('fresh-meals-content');
+    if (!meals.length) {
+      el.innerHTML = '<div class="empty">No leftovers</div>';
+      return;
+    }
+    el.innerHTML = meals.map(m => {
+      const cooked = new Date(m.cooked_date + 'T00:00:00');
+      const age = Math.floor((TODAY - cooked) / 86400000);
+      let ageBadge = '';
+      if (age >= 4)      ageBadge = `<span class="badge badge-urgent">Day ${age} — eat today</span>`;
+      else if (age >= 3) ageBadge = `<span class="badge badge-warn">Day ${age}</span>`;
+      else if (age > 0)  ageBadge = `<span class="badge badge-tag">${age}d ago</span>`;
+      else               ageBadge = `<span class="badge badge-tag">Today</span>`;
+      return `<div class="meal">
+        <div>
+          <div class="meal-name">${m.name}</div>
+          <span class="badge badge-tag">${m.cuisine_tag}</span>
+          ${ageBadge}
+        </div>
+        <span class="meal-portions">${m.portions_remaining}<span style="font-weight:400;color:var(--muted)">/${m.total_portions}</span></span>
+      </div>`;
+    }).join('');
   }
 
   function renderMeals(meals) {
