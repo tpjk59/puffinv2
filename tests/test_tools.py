@@ -600,6 +600,38 @@ async def test_get_shopping_list_with_gap(db_session: AsyncSession) -> None:
     assert item["quantity_in_stock"] == 200.0
 
 
+async def test_get_shopping_list_unit_normalisation(db_session: AsyncSession) -> None:
+    # Pantry has 1 kg plain flour; recipe needs 200 g — should show as in-stock
+    await crud.create_ingredient(
+        db_session, name="plain flour", quantity=1, unit="kg",
+        source_label="manual", location="pantry", arrived_date=date.today(),
+    )
+    await tools.plan_meal(
+        db_session, name="Crumble",
+        planned_date=date.today().isoformat(),
+        ingredients=[{"name": "plain flour", "quantity": 200, "unit": "g"}],
+    )
+    result = await tools.get_shopping_list(db_session)
+    assert result["count"] == 0, f"plain flour should be in stock but got: {result}"
+
+
+async def test_get_meal_plan_unit_normalisation(db_session: AsyncSession) -> None:
+    # Milk stored in pints; recipe needs ml
+    await crud.create_ingredient(
+        db_session, name="whole milk", quantity=2, unit="pint",
+        source_label="manual", location="fresh", arrived_date=date.today(),
+    )
+    await tools.plan_meal(
+        db_session, name="Pancakes",
+        planned_date=date.today().isoformat(),
+        ingredients=[{"name": "whole milk", "quantity": 300, "unit": "ml"}],
+    )
+    result = await tools.get_meal_plan(db_session)
+    ing = result["plans"][0]["ingredients"][0]
+    # 2 UK pints = 1136 ml >= 300 ml
+    assert ing["in_stock"] is True
+
+
 async def test_get_shopping_list_all_in_stock(db_session: AsyncSession) -> None:
     await crud.create_ingredient(
         db_session, name="red lentils", quantity=500, unit="g",
