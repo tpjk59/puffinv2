@@ -31,9 +31,23 @@ _UNIT_TO_BASE: dict[str, tuple[str, float]] = {
     "pints": ("ml", 568.0),
 }
 
+# Ingredient-specific conversions where the units are otherwise incompatible.
+_INGREDIENT_UNIT_TO_BASE: dict[tuple[str, str], tuple[str, float]] = {
+    ("garlic", "bulb"):  ("cloves", 12),
+    ("garlic", "bulbs"): ("cloves", 12),
+}
 
-def _normalise(quantity: float, unit: str) -> tuple[float, str]:
-    """Return (quantity, base_unit) normalising kg→g, l→ml, pint→ml."""
+
+def _normalise(quantity: float, unit: str, name: str = "") -> tuple[float, str]:
+    """Return (quantity, base_unit) with unit normalisation.
+
+    Checks ingredient-specific conversions first (e.g. garlic bulb→cloves),
+    then generic metric ones (kg→g, l→ml, UK pint→ml).
+    """
+    ing_key = (name.lower(), unit.lower())
+    if ing_key in _INGREDIENT_UNIT_TO_BASE:
+        base_unit, factor = _INGREDIENT_UNIT_TO_BASE[ing_key]
+        return quantity * factor, base_unit
     conv = _UNIT_TO_BASE.get(unit.lower())
     if conv is None:
         return quantity, unit.lower()
@@ -470,7 +484,7 @@ async def get_meal_plan(
     all_inventory = await crud.list_ingredients(session)
     stock: dict[tuple, float] = {}
     for ing in all_inventory:
-        qty, unit = _normalise(ing.quantity, ing.unit)
+        qty, unit = _normalise(ing.quantity, ing.unit, ing.name)
         key = (ing.name.lower(), unit)
         stock[key] = stock.get(key, 0) + qty
 
@@ -479,7 +493,7 @@ async def get_meal_plan(
         ings = await crud.list_meal_plan_ingredients(session, plan.id)
         ing_list = []
         for pi in ings:
-            needed_qty, needed_unit = _normalise(pi.quantity, pi.unit)
+            needed_qty, needed_unit = _normalise(pi.quantity, pi.unit, pi.name)
             have = stock.get((pi.name.lower(), needed_unit), 0.0)
             ing_list.append({
                 "id": pi.id,
@@ -555,7 +569,7 @@ async def get_shopping_list(session: AsyncSession) -> dict:
     for plan in plans:
         ings = await crud.list_meal_plan_ingredients(session, plan.id)
         for pi in ings:
-            norm_qty, norm_unit = _normalise(pi.quantity, pi.unit)
+            norm_qty, norm_unit = _normalise(pi.quantity, pi.unit, pi.name)
             key = (pi.name.lower(), norm_unit)
             if key not in needed:
                 needed[key] = {
@@ -572,7 +586,7 @@ async def get_shopping_list(session: AsyncSession) -> dict:
     all_inventory = await crud.list_ingredients(session)
     stock: dict[tuple, float] = {}
     for ing in all_inventory:
-        qty, unit = _normalise(ing.quantity, ing.unit)
+        qty, unit = _normalise(ing.quantity, ing.unit, ing.name)
         k = (ing.name.lower(), unit)
         stock[k] = stock.get(k, 0) + qty
 

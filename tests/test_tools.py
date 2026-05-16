@@ -615,6 +615,22 @@ async def test_get_shopping_list_unit_normalisation(db_session: AsyncSession) ->
     assert result["count"] == 0, f"plain flour should be in stock but got: {result}"
 
 
+async def test_get_meal_plan_garlic_bulb_to_cloves(db_session: AsyncSession) -> None:
+    # 1 garlic bulb = 12 cloves; recipe needs 3 cloves — should show in-stock
+    await crud.create_ingredient(
+        db_session, name="garlic", quantity=1, unit="bulb",
+        source_label="manual", location="fresh", arrived_date=date.today(),
+    )
+    await tools.plan_meal(
+        db_session, name="Aloo Gobi",
+        planned_date=date.today().isoformat(),
+        ingredients=[{"name": "garlic", "quantity": 3, "unit": "cloves"}],
+    )
+    result = await tools.get_meal_plan(db_session)
+    ing = result["plans"][0]["ingredients"][0]
+    assert ing["in_stock"] is True, f"1 bulb should cover 3 cloves but got: {ing}"
+
+
 async def test_get_meal_plan_unit_normalisation(db_session: AsyncSession) -> None:
     # Milk stored in pints; recipe needs ml
     await crud.create_ingredient(
