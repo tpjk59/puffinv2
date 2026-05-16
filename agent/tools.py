@@ -209,10 +209,16 @@ async def get_nutrition_summary(
         "protein_g": sum(l.protein_g for l in logs),
         "fibre_g": sum(l.fibre_g for l in logs),
     }
+    def _pref_float(key: str, default: float) -> float:
+        try:
+            return float(prefs.get(key, default))
+        except (ValueError, TypeError):
+            return default
+
     targets = {
-        "calories": float(prefs.get("calorie_target", 2200)),
-        "protein_g": float(prefs.get("protein_target_g", 140)),
-        "fibre_g": float(prefs.get("fibre_target_g", 30)),
+        "calories": _pref_float("calorie_target", 2200),
+        "protein_g": _pref_float("protein_target_g", 140),
+        "fibre_g": _pref_float("fibre_target_g", 30),
     }
     return {"period": period, "totals": totals, "targets": targets, "log_count": len(logs)}
 
@@ -538,7 +544,13 @@ TOOL_DEFINITIONS: list[dict] = [
     },
     {
         "name": "set_preference",
-        "description": "Update a user preference.",
+        "description": (
+            "Update a user preference. "
+            "Numeric preferences (calorie_target, protein_target_g, fibre_target_g, "
+            "weekday_max_cook_minutes, weekend_max_cook_minutes, batch_cook_portions_target) "
+            "must be stored as a single number, not a range. "
+            "If the user gives a range (e.g. '1400-1600 kcal'), use the midpoint (1500)."
+        ),
         "input_schema": {
             "type": "object",
             "properties": {
