@@ -14,7 +14,7 @@ class IngredientArrival:
     """A single ingredient arriving into inventory from any source.
 
     Quantities use metric units (g, kg, ml, l) or count-based units
-    (whole, bunch, tin, etc.). Location must be one of: fridge, freezer, pantry.
+    (whole, bunch, tin, etc.). Location must be one of: fresh, freezer, pantry.
     """
 
     name: str
@@ -23,7 +23,7 @@ class IngredientArrival:
     source_label: str
     arrived_date: date
     best_before: date | None = None
-    location: str = "fridge"
+    location: str = "fresh"
     notes: str | None = None
 
 

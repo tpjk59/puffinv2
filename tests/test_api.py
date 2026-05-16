@@ -31,11 +31,11 @@ async def test_api_inventory_returns_list(client: AsyncClient) -> None:
 
 
 async def test_api_inventory_location_filter(client: AsyncClient) -> None:
-    r = await client.get("/api/inventory?location=fridge")
+    r = await client.get("/api/inventory?location=fresh")
     assert r.status_code == 200
     data = r.json()
     for ing in data["ingredients"]:
-        assert ing["location"] == "fridge"
+        assert ing["location"] == "fresh"
 
 
 async def test_api_meals_returns_list(client: AsyncClient) -> None:

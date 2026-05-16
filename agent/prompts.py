@@ -33,7 +33,10 @@ prawns not shrimp)
 - quantity: numeric amount (float)
 - unit: unit of measure — one of: g, kg, ml, l, whole, bunch, tin, sprig, \
 clove, bulb, rasher, fillet, or another appropriate unit
-- location: one of "fridge", "freezer", "pantry" (default "fridge" if not mentioned)
+- location: one of "fresh", "freezer", "pantry" (default "fresh" if not mentioned; \
+use "fresh" for anything kept in the fridge or with a short shelf life)
+- subcategory: one of "meat", "fish", "dairy", "eggs", "fruit", "veg", "grain", \
+"legume", "bakery", "condiment", "herb_spice", "other" — infer from the ingredient name
 - best_before: ISO date string YYYY-MM-DD, or null if not mentioned; \
 resolve relative dates like "Friday" or "tomorrow" relative to today's date
 - notes: any quality notes (e.g. "slightly soft") or null
@@ -52,7 +55,9 @@ Identify all visible ingredients and return a JSON array. Each object must have:
 aubergine not eggplant, coriander not cilantro, etc.)
 - quantity: estimated numeric amount (float) — estimate if not countable
 - unit: g, kg, ml, l, whole, bunch, tin, or another appropriate unit
-- location: "fridge", "freezer", or "pantry" — infer from context, default "fridge"
+- location: "fresh", "freezer", or "pantry" — infer from context, default "fresh"
+- subcategory: one of "meat", "fish", "dairy", "eggs", "fruit", "veg", "grain", \
+"legume", "bakery", "condiment", "herb_spice", "other" — infer from the ingredient
 - best_before: ISO date YYYY-MM-DD if a date label is visible, otherwise null
 - notes: confidence level as "confidence:high", "confidence:medium", or \
 "confidence:low", plus any quality observations separated by semicolons
@@ -69,7 +74,9 @@ Return a JSON array where each object has:
 - name: ingredient name using British terms
 - quantity: numeric amount (float)
 - unit: g, kg, ml, l, whole, bunch, tin, or another appropriate unit
-- location: where it should be stored — "fridge", "freezer", or "pantry"
+- location: where it should be stored — "fresh", "freezer", or "pantry"
+- subcategory: one of "meat", "fish", "dairy", "eggs", "fruit", "veg", "grain", \
+"legume", "bakery", "condiment", "herb_spice", "other" — infer from the ingredient
 - best_before: ISO date YYYY-MM-DD if visible, otherwise null
 - notes: any relevant notes, or null
 

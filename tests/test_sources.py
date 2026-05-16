@@ -32,10 +32,10 @@ def test_ingredient_arrival_fields() -> None:
         unit="whole",
         source_label="manual",
         arrived_date=date.today(),
-        location="fridge",
+        location="fresh",
     )
     assert arrival.name == "courgette"
-    assert arrival.location == "fridge"
+    assert arrival.location == "fresh"
     assert arrival.best_before is None
     assert arrival.notes is None
 
@@ -102,7 +102,7 @@ def _make_manual_source(items: list[dict]) -> ManualSource:
 async def test_manual_source_parses_single_ingredient() -> None:
     source = _make_manual_source([
         {"name": "chicken thighs", "quantity": 500, "unit": "g",
-         "location": "fridge", "best_before": None, "notes": None},
+         "location": "fresh", "best_before": None, "notes": None},
     ])
     arrivals = await source.fetch(text="500g chicken thighs, fridge")
 
@@ -111,7 +111,7 @@ async def test_manual_source_parses_single_ingredient() -> None:
     assert a.name == "chicken thighs"
     assert a.quantity == 500.0
     assert a.unit == "g"
-    assert a.location == "fridge"
+    assert a.location == "fresh"
     assert a.source_label == "manual"
     assert a.best_before is None
 
@@ -119,7 +119,7 @@ async def test_manual_source_parses_single_ingredient() -> None:
 async def test_manual_source_parses_multiple_ingredients() -> None:
     source = _make_manual_source([
         {"name": "courgette", "quantity": 2, "unit": "whole",
-         "location": "fridge", "best_before": None, "notes": None},
+         "location": "fresh", "best_before": None, "notes": None},
         {"name": "red lentils", "quantity": 500, "unit": "g",
          "location": "pantry", "best_before": None, "notes": None},
     ])
@@ -135,7 +135,7 @@ async def test_manual_source_parses_best_before() -> None:
     best_before_str = "2026-05-20"
     source = _make_manual_source([
         {"name": "spinach", "quantity": 150, "unit": "g",
-         "location": "fridge", "best_before": best_before_str, "notes": None},
+         "location": "fresh", "best_before": best_before_str, "notes": None},
     ])
     arrivals = await source.fetch(text="150g spinach, best before 20th May")
 
@@ -158,7 +158,7 @@ async def test_manual_source_returns_empty_when_no_text_kwarg() -> None:
 async def test_manual_source_strips_markdown_fences() -> None:
     """Handles LLM responses that include ```json ... ``` fences."""
     items = [{"name": "aubergine", "quantity": 1, "unit": "whole",
-              "location": "fridge", "best_before": None, "notes": None}]
+              "location": "fresh", "best_before": None, "notes": None}]
 
     msg = MagicMock()
     msg.content = [MagicMock()]
@@ -220,7 +220,7 @@ async def test_camera_source_parses_ingredients() -> None:
     source = _make_camera_source([
         {
             "name": "aubergine", "quantity": 1, "unit": "whole",
-            "location": "fridge", "best_before": None, "notes": "confidence:high",
+            "location": "fresh", "best_before": None, "notes": "confidence:high",
         }
     ])
     arrivals = await source.fetch(image_b64="fakebase64==")
@@ -234,7 +234,7 @@ async def test_camera_source_parses_best_before() -> None:
     source = _make_camera_source([
         {
             "name": "milk", "quantity": 2, "unit": "l",
-            "location": "fridge", "best_before": "2026-05-20", "notes": "confidence:high",
+            "location": "fresh", "best_before": "2026-05-20", "notes": "confidence:high",
         }
     ])
     arrivals = await source.fetch(image_b64="fakebase64==")
@@ -243,7 +243,7 @@ async def test_camera_source_parses_best_before() -> None:
 
 async def test_camera_source_strips_markdown_fences() -> None:
     items = [{"name": "courgette", "quantity": 2, "unit": "whole",
-              "location": "fridge", "best_before": None, "notes": "confidence:medium"}]
+              "location": "fresh", "best_before": None, "notes": "confidence:medium"}]
     msg = MagicMock()
     msg.content = [MagicMock()]
     msg.content[0].text = "```json\n" + json.dumps(items) + "\n```"
@@ -300,7 +300,7 @@ def _make_web_scraper(items: list[dict], url: str = "http://example.com") -> Web
 async def test_web_scraper_fetches_and_parses() -> None:
     items = [
         {"name": "courgette", "quantity": 2, "unit": "whole",
-         "location": "fridge", "best_before": None, "notes": None},
+         "location": "fresh", "best_before": None, "notes": None},
     ]
     scraper = _make_web_scraper(items)
     arrivals = await scraper.fetch()
@@ -318,7 +318,7 @@ async def test_web_scraper_no_url_raises() -> None:
 
 async def test_web_scraper_url_override() -> None:
     items = [{"name": "spinach", "quantity": 100, "unit": "g",
-              "location": "fridge", "best_before": None, "notes": None}]
+              "location": "fresh", "best_before": None, "notes": None}]
     scraper = _make_web_scraper(items, url=None)
     arrivals = await scraper.fetch(url="http://override.example.com")
     assert len(arrivals) == 1

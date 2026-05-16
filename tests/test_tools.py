@@ -25,15 +25,15 @@ async def test_get_inventory_empty(db_session: AsyncSession) -> None:
 async def test_get_inventory_by_location(db_session: AsyncSession) -> None:
     await crud.create_ingredient(
         db_session, name="spinach", quantity=150, unit="g",
-        source_label="manual", location="fridge", arrived_date=date.today(),
+        source_label="manual", location="fresh", arrived_date=date.today(),
     )
     await crud.create_ingredient(
         db_session, name="basmati rice", quantity=1, unit="kg",
         source_label="manual", location="pantry", arrived_date=date.today(),
     )
-    fridge = await tools.get_inventory(db_session, location="fridge")
-    assert fridge["count"] == 1
-    assert fridge["ingredients"][0]["name"] == "spinach"
+    fresh = await tools.get_inventory(db_session, location="fresh")
+    assert fresh["count"] == 1
+    assert fresh["ingredients"][0]["name"] == "spinach"
 
 
 async def test_get_inventory_expiry_filter(db_session: AsyncSession) -> None:
@@ -41,11 +41,11 @@ async def test_get_inventory_expiry_filter(db_session: AsyncSession) -> None:
     later = date.today() + timedelta(days=30)
     await crud.create_ingredient(
         db_session, name="chicken thighs", quantity=500, unit="g",
-        source_label="manual", location="fridge", arrived_date=date.today(), best_before=soon,
+        source_label="manual", location="fresh", arrived_date=date.today(), best_before=soon,
     )
     await crud.create_ingredient(
         db_session, name="mature cheddar", quantity=200, unit="g",
-        source_label="manual", location="fridge", arrived_date=date.today(), best_before=later,
+        source_label="manual", location="fresh", arrived_date=date.today(), best_before=later,
     )
     expiring = await tools.get_inventory(db_session, expiry_within_days=3)
     assert expiring["count"] == 1
@@ -59,7 +59,7 @@ async def test_get_inventory_expiry_filter(db_session: AsyncSession) -> None:
 
 async def test_update_inventory_add(db_session: AsyncSession) -> None:
     result = await tools.update_inventory(
-        db_session, action="add", name="courgette", quantity=3, unit="whole", location="fridge"
+        db_session, action="add", name="courgette", quantity=3, unit="whole", location="fresh"
     )
     assert "added" in result
     assert result["added"]["name"] == "courgette"
@@ -81,7 +81,7 @@ async def test_update_inventory_consume_partial(db_session: AsyncSession) -> Non
 async def test_update_inventory_consume_fully(db_session: AsyncSession) -> None:
     ing = await crud.create_ingredient(
         db_session, name="free-range eggs", quantity=2, unit="whole",
-        source_label="manual", location="fridge", arrived_date=date.today(),
+        source_label="manual", location="fresh", arrived_date=date.today(),
     )
     result = await tools.update_inventory(
         db_session, action="consume", ingredient_id=ing.id, quantity=2
@@ -93,7 +93,7 @@ async def test_update_inventory_consume_fully(db_session: AsyncSession) -> None:
 async def test_update_inventory_expire(db_session: AsyncSession) -> None:
     ing = await crud.create_ingredient(
         db_session, name="old milk", quantity=500, unit="ml",
-        source_label="manual", location="fridge", arrived_date=date.today(),
+        source_label="manual", location="fresh", arrived_date=date.today(),
     )
     result = await tools.update_inventory(
         db_session, action="expire", ingredient_id=ing.id
@@ -142,7 +142,7 @@ async def test_log_meal_cooked_creates_meal_and_deducts(db_session: AsyncSession
 async def test_log_meal_cooked_fully_uses_ingredient(db_session: AsyncSession) -> None:
     ing = await crud.create_ingredient(
         db_session, name="chicken thighs", quantity=600, unit="g",
-        source_label="manual", location="fridge", arrived_date=date.today(),
+        source_label="manual", location="fresh", arrived_date=date.today(),
     )
     await tools.log_meal_cooked(
         db_session,
@@ -180,7 +180,7 @@ async def test_log_meal_eaten_insufficient_portions(db_session: AsyncSession) ->
     meal = await crud.create_meal(
         db_session, name="Soup", cuisine_tag="british",
         cooked_date=date.today(), total_portions=2, portions_remaining=1,
-        location="fridge",
+        location="fresh",
     )
     result = await tools.log_meal_eaten(
         db_session, meal_id=meal.id, portions=3, calories=300, protein_g=15, fibre_g=5
@@ -207,7 +207,7 @@ async def test_get_meal_history(db_session: AsyncSession) -> None:
     )
     await crud.create_meal(
         db_session, name="Pasta", cuisine_tag="italian",
-        cooked_date=date.today(), total_portions=2, portions_remaining=2, location="fridge",
+        cooked_date=date.today(), total_portions=2, portions_remaining=2, location="fresh",
     )
     all_meals = await tools.get_meal_history(db_session)
     assert len(all_meals["meals"]) == 2
@@ -420,7 +420,7 @@ async def test_lookup_nutrition_saves_to_ingredient(db_session: AsyncSession) ->
     from unittest.mock import patch, AsyncMock as AM
     ing = await crud.create_ingredient(
         db_session, name="courgette", quantity=3, unit="whole",
-        source_label="manual", location="fridge", arrived_date=date.today(),
+        source_label="manual", location="fresh", arrived_date=date.today(),
     )
     assert ing.calories_per_100g is None
 

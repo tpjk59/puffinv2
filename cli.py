@@ -71,7 +71,8 @@ async def _seed(force: bool = False) -> None:
                 quantity=3.0,
                 unit="whole",
                 source_label="manual",
-                location="fridge",
+                location="fresh",
+                subcategory="veg",
                 arrived_date=today - timedelta(days=2),
             ),
             dict(
@@ -79,7 +80,8 @@ async def _seed(force: bool = False) -> None:
                 quantity=1.0,
                 unit="whole",
                 source_label="manual",
-                location="fridge",
+                location="fresh",
+                subcategory="veg",
                 arrived_date=today - timedelta(days=2),
             ),
             dict(
@@ -87,7 +89,8 @@ async def _seed(force: bool = False) -> None:
                 quantity=800.0,
                 unit="g",
                 source_label="manual",
-                location="fridge",
+                location="fresh",
+                subcategory="meat",
                 arrived_date=today - timedelta(days=1),
                 best_before=today + timedelta(days=1),  # expiry risk
             ),
@@ -97,6 +100,7 @@ async def _seed(force: bool = False) -> None:
                 unit="g",
                 source_label="manual",
                 location="pantry",
+                subcategory="legume",
                 arrived_date=today - timedelta(days=6),
             ),
             dict(
@@ -105,6 +109,7 @@ async def _seed(force: bool = False) -> None:
                 unit="tin",
                 source_label="manual",
                 location="pantry",
+                subcategory="condiment",
                 arrived_date=today - timedelta(days=15),
             ),
             dict(
@@ -112,7 +117,8 @@ async def _seed(force: bool = False) -> None:
                 quantity=200.0,
                 unit="g",
                 source_label="manual",
-                location="fridge",
+                location="fresh",
+                subcategory="dairy",
                 arrived_date=today - timedelta(days=3),
                 best_before=today + timedelta(days=14),
             ),
@@ -122,6 +128,7 @@ async def _seed(force: bool = False) -> None:
                 unit="whole",
                 source_label="manual",
                 location="pantry",
+                subcategory="veg",
                 arrived_date=today - timedelta(days=6),
             ),
             dict(
@@ -129,7 +136,8 @@ async def _seed(force: bool = False) -> None:
                 quantity=12.0,
                 unit="whole",
                 source_label="manual",
-                location="fridge",
+                location="fresh",
+                subcategory="eggs",
                 arrived_date=today - timedelta(days=2),
                 best_before=today + timedelta(days=26),
             ),
@@ -138,7 +146,8 @@ async def _seed(force: bool = False) -> None:
                 quantity=150.0,
                 unit="g",
                 source_label="manual",
-                location="fridge",
+                location="fresh",
+                subcategory="veg",
                 arrived_date=today - timedelta(days=3),
                 best_before=today + timedelta(days=1),  # expiry risk
             ),
@@ -148,6 +157,7 @@ async def _seed(force: bool = False) -> None:
                 unit="kg",
                 source_label="manual",
                 location="pantry",
+                subcategory="grain",
                 arrived_date=today - timedelta(days=15),
             ),
         ]

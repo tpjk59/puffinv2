@@ -20,7 +20,7 @@ async def test_create_and_get_ingredient(db_session: AsyncSession) -> None:
         quantity=3.0,
         unit="whole",
         source_label="manual",
-        location="fridge",
+        location="fresh",
         arrived_date=date.today(),
     )
     assert ing.id is not None
@@ -40,18 +40,18 @@ async def test_get_ingredient_missing(db_session: AsyncSession) -> None:
 async def test_list_ingredients_by_location(db_session: AsyncSession) -> None:
     await crud.create_ingredient(
         db_session, name="spinach", quantity=150.0, unit="g",
-        source_label="manual", location="fridge", arrived_date=date.today(),
+        source_label="manual", location="fresh", arrived_date=date.today(),
     )
     await crud.create_ingredient(
         db_session, name="basmati rice", quantity=1.0, unit="kg",
         source_label="manual", location="pantry", arrived_date=date.today(),
     )
 
-    fridge = await crud.list_ingredients(db_session, location="fridge")
+    fresh = await crud.list_ingredients(db_session, location="fresh")
     pantry = await crud.list_ingredients(db_session, location="pantry")
 
-    assert len(fridge) == 1
-    assert fridge[0].name == "spinach"
+    assert len(fresh) == 1
+    assert fresh[0].name == "spinach"
     assert len(pantry) == 1
     assert pantry[0].name == "basmati rice"
 
@@ -62,12 +62,12 @@ async def test_list_ingredients_by_expiry(db_session: AsyncSession) -> None:
 
     await crud.create_ingredient(
         db_session, name="chicken thighs", quantity=500.0, unit="g",
-        source_label="manual", location="fridge", arrived_date=date.today(),
+        source_label="manual", location="fresh", arrived_date=date.today(),
         best_before=soon,
     )
     await crud.create_ingredient(
         db_session, name="mature cheddar", quantity=200.0, unit="g",
-        source_label="manual", location="fridge", arrived_date=date.today(),
+        source_label="manual", location="fresh", arrived_date=date.today(),
         best_before=later,
     )
 
@@ -81,7 +81,7 @@ async def test_list_ingredients_by_expiry(db_session: AsyncSession) -> None:
 async def test_update_ingredient(db_session: AsyncSession) -> None:
     ing = await crud.create_ingredient(
         db_session, name="aubergine", quantity=2.0, unit="whole",
-        source_label="manual", location="fridge", arrived_date=date.today(),
+        source_label="manual", location="fresh", arrived_date=date.today(),
     )
     updated = await crud.update_ingredient(db_session, ing.id, {"quantity": 1.0})
     assert updated is not None
@@ -91,7 +91,7 @@ async def test_update_ingredient(db_session: AsyncSession) -> None:
 async def test_delete_ingredient(db_session: AsyncSession) -> None:
     ing = await crud.create_ingredient(
         db_session, name="rocket", quantity=80.0, unit="g",
-        source_label="manual", location="fridge", arrived_date=date.today(),
+        source_label="manual", location="fresh", arrived_date=date.today(),
     )
     deleted = await crud.delete_ingredient(db_session, ing.id)
     assert deleted is True
@@ -135,14 +135,14 @@ async def test_list_meals_by_location(db_session: AsyncSession) -> None:
     await crud.create_meal(
         db_session, name="Pasta", cuisine_tag="italian",
         cooked_date=date.today(), total_portions=2, portions_remaining=1,
-        location="fridge",
+        location="fresh",
     )
 
     freezer = await crud.list_meals(db_session, location="freezer")
-    fridge = await crud.list_meals(db_session, location="fridge")
+    fresh = await crud.list_meals(db_session, location="fresh")
 
     assert len(freezer) == 1
-    assert len(fridge) == 1
+    assert len(fresh) == 1
 
 
 async def test_update_meal(db_session: AsyncSession) -> None:

@@ -224,11 +224,11 @@
   <div class="card">
     <div class="card-title">Inventory</div>
     <div class="tabs">
-      <button class="tab active" data-loc="fridge"  onclick="switchTab('fridge')">Fridge</button>
+      <button class="tab active" data-loc="fresh"   onclick="switchTab('fresh')">Fresh</button>
       <button class="tab"        data-loc="freezer" onclick="switchTab('freezer')">Freezer</button>
       <button class="tab"        data-loc="pantry"  onclick="switchTab('pantry')">Pantry</button>
     </div>
-    <div id="panel-fridge"  class="tab-panel active"><div class="loading">Loading...</div></div>
+    <div id="panel-fresh"   class="tab-panel active"><div class="loading">Loading...</div></div>
     <div id="panel-freezer" class="tab-panel"><div class="loading">Loading...</div></div>
     <div id="panel-pantry"  class="tab-panel"><div class="loading">Loading...</div></div>
   </div>
@@ -263,16 +263,16 @@
   async function loadAll() {
     document.getElementById('refresh-btn').textContent = '...';
     try {
-      const [nutrition, fridge, freezer, pantry, meals, deliveries] = await Promise.all([
+      const [nutrition, fresh, freezer, pantry, meals, deliveries] = await Promise.all([
         fetch('/api/nutrition/summary?period=today').then(r => r.json()),
-        fetch('/api/inventory?location=fridge').then(r => r.json()),
+        fetch('/api/inventory?location=fresh').then(r => r.json()),
         fetch('/api/inventory?location=freezer').then(r => r.json()),
         fetch('/api/inventory?location=pantry').then(r => r.json()),
         fetch('/api/meals?location=freezer').then(r => r.json()),
         fetch('/api/delivery-schedule').then(r => r.json()),
       ]);
       renderNutrition(nutrition);
-      renderPanel('fridge',  fridge.ingredients  || []);
+      renderPanel('fresh',   fresh.ingredients   || []);
       renderPanel('freezer', freezer.ingredients || []);
       renderPanel('pantry',  pantry.ingredients  || []);
       renderMeals(meals.meals || []);
@@ -332,9 +332,11 @@
       else if (days <= 3)  badge = `<span class="badge badge-warn">${days}d</span>`;
     }
     const qty = item.quantity % 1 === 0 ? item.quantity : (+item.quantity.toFixed(1));
+    const subcat = item.subcategory ? `<span class="badge badge-tag">${item.subcategory}</span>` : '';
     return `<li class="item">
       <span class="item-name">${item.name}</span>
       <span class="item-meta">
+        ${subcat}
         ${badge}
         <span class="item-qty">${qty}${item.unit}</span>
       </span>

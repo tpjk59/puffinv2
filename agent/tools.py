@@ -31,6 +31,7 @@ def _ingredient_to_dict(ing) -> dict:
         "location": ing.location,
         "arrived_date": ing.arrived_date.isoformat(),
         "best_before": ing.best_before.isoformat() if ing.best_before else None,
+        "subcategory": ing.subcategory,
         "calories_per_100g": ing.calories_per_100g,
         "protein_per_100g": ing.protein_per_100g,
         "fibre_per_100g": ing.fibre_per_100g,
@@ -82,6 +83,7 @@ async def update_inventory(
     quantity: Optional[float] = None,
     unit: Optional[str] = None,
     location: Optional[str] = None,
+    subcategory: Optional[str] = None,
     arrived_date: Optional[str] = None,
     best_before: Optional[str] = None,
     notes: Optional[str] = None,
@@ -93,7 +95,8 @@ async def update_inventory(
             quantity=quantity,
             unit=unit,
             source_label="manual",
-            location=location or "fridge",
+            location=location or "fresh",
+            subcategory=subcategory,
             arrived_date=date.fromisoformat(arrived_date) if arrived_date else date.today(),
             best_before=date.fromisoformat(best_before) if best_before else None,
             notes=notes,
@@ -403,7 +406,7 @@ TOOL_DEFINITIONS: list[dict] = [
             "properties": {
                 "location": {
                     "type": "string",
-                    "enum": ["fridge", "freezer", "pantry"],
+                    "enum": ["fresh", "freezer", "pantry"],
                     "description": "Filter by storage location.",
                 },
                 "expiry_within_days": {
@@ -441,8 +444,13 @@ TOOL_DEFINITIONS: list[dict] = [
                 "unit": {"type": "string", "description": "Unit of measure, e.g. g, kg, whole. Required for add."},
                 "location": {
                     "type": "string",
-                    "enum": ["fridge", "freezer", "pantry"],
-                    "description": "Storage location. Required for add.",
+                    "enum": ["fresh", "freezer", "pantry"],
+                    "description": "Storage location. Use 'fresh' for anything fridge-kept or short-lived. Required for add.",
+                },
+                "subcategory": {
+                    "type": "string",
+                    "enum": ["meat", "fish", "dairy", "eggs", "fruit", "veg", "grain", "legume", "bakery", "condiment", "herb_spice", "other"],
+                    "description": "Ingredient subcategory. Infer from the ingredient name if not specified.",
                 },
                 "arrived_date": {
                     "type": "string",
@@ -489,7 +497,7 @@ TOOL_DEFINITIONS: list[dict] = [
                 },
                 "location": {
                     "type": "string",
-                    "enum": ["fridge", "freezer"],
+                    "enum": ["fresh", "freezer"],
                     "description": "Where to store the cooked meal. Defaults to freezer.",
                 },
                 "notes": {"type": "string"},
@@ -518,7 +526,7 @@ TOOL_DEFINITIONS: list[dict] = [
         "input_schema": {
             "type": "object",
             "properties": {
-                "location": {"type": "string", "enum": ["fridge", "freezer"]},
+                "location": {"type": "string", "enum": ["fresh", "freezer"]},
                 "limit": {"type": "integer", "description": "Defaults to 20."},
             },
         },

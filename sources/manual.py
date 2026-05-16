@@ -74,7 +74,7 @@ class ManualSource:
                     unit=item["unit"],
                     source_label=self.source_label,
                     arrived_date=today_date,
-                    location=item.get("location", "fridge"),
+                    location=item.get("location", "fresh"),
                     best_before=best_before,
                     notes=item.get("notes"),
                 )
