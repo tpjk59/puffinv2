@@ -177,7 +177,6 @@ async def log_meal_eaten(
             "error": f"Only {meal.portions_remaining} portion(s) remaining, cannot eat {portions}"
         }
     new_portions = meal.portions_remaining - portions
-    await crud.update_meal(session, meal_id, {"portions_remaining": new_portions})
     log = await crud.create_nutrition_log(
         session,
         log_date=date.today(),
@@ -186,6 +185,10 @@ async def log_meal_eaten(
         fibre_g=fibre_g,
         source_meal_id=meal_id,
     )
+    if new_portions <= 0:
+        await crud.delete_meal(session, meal_id)
+        return {"status": "fully eaten and removed", "nutrition_log_id": log.id}
+    await crud.update_meal(session, meal_id, {"portions_remaining": new_portions})
     return {"portions_remaining": new_portions, "nutrition_log_id": log.id}
 
 
@@ -195,7 +198,15 @@ async def get_meal_history(
     limit: int = 20,
 ) -> dict:
     meals = await crud.list_meals(session, location=location)
-    return {"meals": [_meal_to_dict(m) for m in meals[:limit]]}
+    active = [m for m in meals if m.portions_remaining > 0]
+    return {"meals": [_meal_to_dict(m) for m in active[:limit]]}
+
+
+async def delete_meal(session: AsyncSession, meal_id: int) -> dict:
+    deleted = await crud.delete_meal(session, meal_id)
+    if not deleted:
+        return {"error": f"Meal {meal_id} not found"}
+    return {"status": "deleted", "meal_id": meal_id}
 
 
 async def get_nutrition_summary(
@@ -370,6 +381,7 @@ _HANDLERS = {
     "update_inventory": update_inventory,
     "log_meal_cooked": log_meal_cooked,
     "log_meal_eaten": log_meal_eaten,
+    "delete_meal": delete_meal,
     "get_meal_history": get_meal_history,
     "get_nutrition_summary": get_nutrition_summary,
     "get_preferences": get_preferences,
@@ -519,6 +531,17 @@ TOOL_DEFINITIONS: list[dict] = [
                 "fibre_g": {"type": "number"},
             },
             "required": ["meal_id", "calories", "protein_g", "fibre_g"],
+        },
+    },
+    {
+        "name": "delete_meal",
+        "description": "Permanently delete a meal record. Use when the user wants to remove a meal (e.g. thrown away, added by mistake).",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "meal_id": {"type": "integer"},
+            },
+            "required": ["meal_id"],
         },
     },
     {
