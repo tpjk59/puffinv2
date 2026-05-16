@@ -368,3 +368,120 @@ async def test_dispatch_tool_unknown_name(db_session: AsyncSession) -> None:
 async def test_dispatch_tool_get_inventory(db_session: AsyncSession) -> None:
     result = await tools.dispatch_tool("get_inventory", {}, db_session)
     assert "ingredients" in result
+
+
+# ---------------------------------------------------------------------------
+# fetch_from_source records delivery schedule
+# ---------------------------------------------------------------------------
+
+
+async def test_fetch_from_source_records_delivery_schedule(db_session: AsyncSession) -> None:
+    mock_msg = MagicMock()
+    mock_msg.content = [MagicMock()]
+    mock_msg.content[0].text = json.dumps([
+        {"name": "carrot", "quantity": 4, "unit": "whole",
+         "location": "fridge", "best_before": None, "notes": None},
+    ])
+    mock_client = MagicMock()
+    mock_client.messages.create = AsyncMock(return_value=mock_msg)
+
+    import sources.registry as reg
+    from sources.manual import ManualSource
+
+    original = reg._registry["manual"]
+    reg._registry["manual"] = ManualSource(client=mock_client)
+    try:
+        await tools.fetch_from_source(db_session, source_label="manual", text="4 carrots")
+        schedules = await crud.list_delivery_schedules(db_session, source_label="manual")
+        assert len(schedules) == 1
+        assert schedules[0].source_label == "manual"
+    finally:
+        reg._registry["manual"] = original
+
+
+# ---------------------------------------------------------------------------
+# lookup_nutrition
+# ---------------------------------------------------------------------------
+
+
+async def test_lookup_nutrition_returns_data(db_session: AsyncSession) -> None:
+    from unittest.mock import patch, AsyncMock as AM
+    nutrition_data = {
+        "calories_per_100g": 17.0, "protein_per_100g": 1.2,
+        "fibre_per_100g": 1.1, "source": "usda", "food_name": "Courgette",
+    }
+    with patch("agent.tools.fetch_nutrition", AM(return_value=nutrition_data)):
+        result = await tools.lookup_nutrition(db_session, ingredient_name="courgette")
+    assert result["calories_per_100g"] == 17.0
+    assert result["source"] == "usda"
+
+
+async def test_lookup_nutrition_saves_to_ingredient(db_session: AsyncSession) -> None:
+    from unittest.mock import patch, AsyncMock as AM
+    ing = await crud.create_ingredient(
+        db_session, name="courgette", quantity=3, unit="whole",
+        source_label="manual", location="fridge", arrived_date=date.today(),
+    )
+    assert ing.calories_per_100g is None
+
+    nutrition_data = {
+        "calories_per_100g": 17.0, "protein_per_100g": 1.2,
+        "fibre_per_100g": 1.1, "source": "usda", "food_name": "Courgette",
+    }
+    with patch("agent.tools.fetch_nutrition", AM(return_value=nutrition_data)):
+        result = await tools.lookup_nutrition(
+            db_session, ingredient_name="courgette", ingredient_id=ing.id
+        )
+    assert result["saved_to_ingredient_id"] == ing.id
+
+    updated = await crud.get_ingredient(db_session, ing.id)
+    assert updated.calories_per_100g == 17.0
+    assert updated.protein_per_100g == 1.2
+
+
+async def test_lookup_nutrition_not_found(db_session: AsyncSession) -> None:
+    from unittest.mock import patch, AsyncMock as AM
+    with patch("agent.tools.fetch_nutrition", AM(return_value=None)):
+        result = await tools.lookup_nutrition(db_session, ingredient_name="xyzzy123")
+    assert "error" in result
+
+
+# ---------------------------------------------------------------------------
+# get_delivery_schedule
+# ---------------------------------------------------------------------------
+
+
+async def test_get_delivery_schedule_empty(db_session: AsyncSession) -> None:
+    result = await tools.get_delivery_schedule(db_session)
+    assert result["schedules"] == []
+
+
+async def test_get_delivery_schedule_with_data(db_session: AsyncSession) -> None:
+    from datetime import UTC, datetime
+    await crud.create_delivery_schedule(
+        db_session,
+        source_label="veg_box",
+        expected_date=date.today(),
+        scraped_at=datetime.now(UTC),
+        raw_json='[{"name":"courgette"},{"name":"kale"}]',
+    )
+    result = await tools.get_delivery_schedule(db_session)
+    assert len(result["schedules"]) == 1
+    assert result["schedules"][0]["source_label"] == "veg_box"
+    assert result["schedules"][0]["item_count"] == 2
+
+
+async def test_get_delivery_schedule_filter_by_source(db_session: AsyncSession) -> None:
+    from datetime import UTC, datetime
+    now = datetime.now(UTC)
+    await crud.create_delivery_schedule(
+        db_session, source_label="veg_box", expected_date=date.today(),
+        scraped_at=now, raw_json="[]",
+    )
+    await crud.create_delivery_schedule(
+        db_session, source_label="meat_box", expected_date=date.today(),
+        scraped_at=now, raw_json="[]",
+    )
+    result = await tools.get_delivery_schedule(db_session, source_label="veg_box")
+    assert len(result["schedules"]) == 1
+    assert result["schedules"][0]["source_label"] == "veg_box"

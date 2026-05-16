@@ -1,11 +1,17 @@
-"""FastAPI application — webhook endpoint and health check."""
+"""FastAPI application — webhook, REST API, and web dashboard."""
 
 import os
 from contextlib import asynccontextmanager
+from pathlib import Path
+from typing import Optional
 
-from fastapi import FastAPI, Request, Response
+from fastapi import FastAPI, Query, Request, Response
+from fastapi.responses import FileResponse
+from fastapi.staticfiles import StaticFiles
 
 from db.database import AsyncSessionLocal, create_all_tables
+
+_STATIC = Path(__file__).parent / "static"
 
 
 @asynccontextmanager
@@ -20,11 +26,72 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(title="Meal Planner", lifespan=lifespan)
+app.mount("/static", StaticFiles(directory=_STATIC), name="static")
+
+
+# ---------------------------------------------------------------------------
+# Dashboard
+# ---------------------------------------------------------------------------
+
+
+@app.get("/", response_class=FileResponse, include_in_schema=False)
+async def dashboard():
+    return FileResponse(_STATIC / "index.html")
+
+
+# ---------------------------------------------------------------------------
+# Health
+# ---------------------------------------------------------------------------
 
 
 @app.get("/health")
 async def health():
     return {"status": "ok"}
+
+
+# ---------------------------------------------------------------------------
+# REST API (consumed by the web dashboard)
+# ---------------------------------------------------------------------------
+
+
+@app.get("/api/inventory")
+async def api_inventory(location: Optional[str] = Query(None)):
+    from agent.tools import get_inventory
+    async with AsyncSessionLocal() as session:
+        return await get_inventory(session, location=location)
+
+
+@app.get("/api/meals")
+async def api_meals(location: Optional[str] = Query(None)):
+    from agent.tools import get_meal_history
+    async with AsyncSessionLocal() as session:
+        return await get_meal_history(session, location=location)
+
+
+@app.get("/api/nutrition/summary")
+async def api_nutrition_summary(period: str = Query("today")):
+    from agent.tools import get_nutrition_summary
+    async with AsyncSessionLocal() as session:
+        return await get_nutrition_summary(session, period=period)
+
+
+@app.get("/api/preferences")
+async def api_preferences():
+    from agent.tools import get_preferences
+    async with AsyncSessionLocal() as session:
+        return await get_preferences(session)
+
+
+@app.get("/api/delivery-schedule")
+async def api_delivery_schedule(source_label: Optional[str] = Query(None)):
+    from agent.tools import get_delivery_schedule
+    async with AsyncSessionLocal() as session:
+        return await get_delivery_schedule(session, source_label=source_label)
+
+
+# ---------------------------------------------------------------------------
+# Telegram webhook
+# ---------------------------------------------------------------------------
 
 
 @app.post("/webhook/telegram")

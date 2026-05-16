@@ -1,4 +1,4 @@
-"""All 11 agent tool implementations and their Anthropic API definitions.
+"""All 13 agent tool implementations and their Anthropic API definitions.
 
 Each tool is an async function that takes an AsyncSession as its first argument.
 TOOL_DEFINITIONS is the list passed directly to the Anthropic messages.create call.
@@ -6,13 +6,14 @@ dispatch_tool routes a tool_use block to the correct implementation.
 """
 
 import json
-from datetime import date, timedelta
+from datetime import UTC, date, datetime, timedelta
 from typing import Any, Optional
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
 import sources.registry as registry
 from db import crud
+from nutrition.lookup import fetch_nutrition
 
 
 # ---------------------------------------------------------------------------
@@ -249,6 +250,16 @@ async def fetch_from_source(
             notes=arrival.notes,
         )
         created.append(_ingredient_to_dict(ing))
+
+    # Record the scrape in delivery_schedule for history / audit
+    await crud.create_delivery_schedule(
+        session,
+        source_label=source_label,
+        expected_date=date.today(),
+        scraped_at=datetime.now(UTC),
+        raw_json=json.dumps(created),
+    )
+
     return {"added": created, "count": len(created)}
 
 
@@ -294,6 +305,53 @@ async def list_sources(session: AsyncSession) -> dict:
     }
 
 
+async def lookup_nutrition(
+    session: AsyncSession,
+    ingredient_name: str,
+    ingredient_id: Optional[int] = None,
+) -> dict:
+    """Look up per-100g nutrition from USDA / Open Food Facts.
+
+    If ingredient_id is given, persists the result to that ingredient record.
+    """
+    data = await fetch_nutrition(ingredient_name)
+    if data is None:
+        return {"error": f"No nutrition data found for '{ingredient_name}'"}
+    if ingredient_id is not None:
+        await crud.update_ingredient(
+            session,
+            ingredient_id,
+            {
+                "calories_per_100g": data["calories_per_100g"],
+                "protein_per_100g": data["protein_per_100g"],
+                "fibre_per_100g": data["fibre_per_100g"],
+            },
+        )
+        data["saved_to_ingredient_id"] = ingredient_id
+    return data
+
+
+async def get_delivery_schedule(
+    session: AsyncSession,
+    source_label: Optional[str] = None,
+    limit: int = 10,
+) -> dict:
+    """Return recent delivery scrape history."""
+    schedules = await crud.list_delivery_schedules(session, source_label=source_label)
+    return {
+        "schedules": [
+            {
+                "id": s.id,
+                "source_label": s.source_label,
+                "expected_date": s.expected_date.isoformat(),
+                "scraped_at": s.scraped_at.isoformat() if s.scraped_at else None,
+                "item_count": len(json.loads(s.raw_json)) if s.raw_json else 0,
+            }
+            for s in schedules[:limit]
+        ]
+    }
+
+
 # ---------------------------------------------------------------------------
 # Dispatch
 # ---------------------------------------------------------------------------
@@ -310,6 +368,8 @@ _HANDLERS = {
     "fetch_from_source": fetch_from_source,
     "inventory_from_image": inventory_from_image,
     "list_sources": list_sources,
+    "lookup_nutrition": lookup_nutrition,
+    "get_delivery_schedule": get_delivery_schedule,
 }
 
 
@@ -532,6 +592,42 @@ TOOL_DEFINITIONS: list[dict] = [
         "name": "list_sources",
         "description": "List all registered food sources and their descriptions.",
         "input_schema": {"type": "object", "properties": {}},
+    },
+    {
+        "name": "lookup_nutrition",
+        "description": (
+            "Look up per-100g calories, protein, and fibre for an ingredient "
+            "from USDA FoodData Central (falls back to Open Food Facts for British packaged products). "
+            "Pass ingredient_id to save the result to that inventory record."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "ingredient_name": {
+                    "type": "string",
+                    "description": "Name to search for, e.g. 'courgette', 'chicken thigh'.",
+                },
+                "ingredient_id": {
+                    "type": "integer",
+                    "description": "If provided, saves the looked-up data to this ingredient.",
+                },
+            },
+            "required": ["ingredient_name"],
+        },
+    },
+    {
+        "name": "get_delivery_schedule",
+        "description": "Return recent delivery scrape history — when each source was last scraped and how many items were found.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "source_label": {
+                    "type": "string",
+                    "description": "Filter to a specific source, e.g. 'veg_box'.",
+                },
+                "limit": {"type": "integer", "description": "Defaults to 10."},
+            },
+        },
         "cache_control": {"type": "ephemeral"},  # caches entire tool list as a prefix
     },
 ]

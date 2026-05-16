@@ -41,6 +41,29 @@ async def _batch_cook_suggestion(bot_token: str, chat_id: str) -> None:
     )
 
 
+async def _scrape_source(source_label: str, bot_token: str, chat_id: str) -> None:
+    """Scrape a delivery source, persist arrivals, and notify via Telegram."""
+    try:
+        async with AsyncSessionLocal() as session:
+            from agent.tools import fetch_from_source
+            result = await fetch_from_source(session, source_label=source_label)
+        count = result.get("count", 0)
+        label = source_label.replace("_", " ").title()
+        if count > 0:
+            names = [i["name"] for i in result["added"][:5]]
+            summary = ", ".join(names)
+            if count > 5:
+                summary += f" and {count - 5} more"
+            text = f"{label} scraped: {count} item(s) added to inventory ({summary})."
+        else:
+            text = f"{label} scraped but no items found — check the URL or the page format."
+        await _send_telegram(bot_token, chat_id, text)
+    except ValueError:
+        pass  # URL not configured — skip silently
+    except Exception as exc:
+        await _send_telegram(bot_token, chat_id, f"Error scraping {source_label}: {exc}")
+
+
 async def _expiry_check(bot_token: str, chat_id: str) -> None:
     await _run_and_send(
         "Check for any ingredients expiring within the next 3 days. "
@@ -74,6 +97,22 @@ def setup_scheduler(bot_token: str, chat_id: str) -> None:
         id="expiry_check",
         replace_existing=True,
     )
-    # TODO: add veg_box (Monday) and meat_box (alternating Monday) scrape jobs
-    # once VEG_BOX_URL and MEAT_BOX_URL are configured in .env
+    # Source scraping jobs — run only if the URL is configured in .env
+    import os
+    if os.getenv("VEG_BOX_URL"):
+        _scheduler.add_job(
+            _scrape_source,
+            CronTrigger(day_of_week="mon", hour=7, minute=0),
+            args=["veg_box", bot_token, chat_id],
+            id="veg_box_scrape",
+            replace_existing=True,
+        )
+    if os.getenv("MEAT_BOX_URL"):
+        _scheduler.add_job(
+            _scrape_source,
+            CronTrigger(day_of_week="mon", hour=7, minute=5),
+            args=["meat_box", bot_token, chat_id],
+            id="meat_box_scrape",
+            replace_existing=True,
+        )
     _scheduler.start()

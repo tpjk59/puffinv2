@@ -1,0 +1,385 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Puffin</title>
+  <style>
+    :root {
+      --bg:           #f2f4f0;
+      --card:         #ffffff;
+      --accent:       #2d6a4f;
+      --accent-2:     #52b788;
+      --warn:         #e76f51;
+      --warn-soft:    #fff3cd;
+      --warn-softer:  #f8d7da;
+      --text:         #1c1c1e;
+      --muted:        #6b7280;
+      --border:       #e5e7eb;
+      --radius:       14px;
+    }
+
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      font-size: 15px;
+      line-height: 1.5;
+      min-height: 100vh;
+    }
+
+    /* ── Header ── */
+    header {
+      background: var(--accent);
+      color: #fff;
+      padding: 14px 20px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      position: sticky;
+      top: 0;
+      z-index: 10;
+    }
+    header h1 { font-size: 18px; font-weight: 700; letter-spacing: -0.3px; }
+    header time { font-size: 13px; opacity: 0.8; }
+    #refresh-btn {
+      background: rgba(255,255,255,0.2);
+      border: none;
+      color: #fff;
+      padding: 5px 12px;
+      border-radius: 20px;
+      font-size: 13px;
+      cursor: pointer;
+    }
+    #refresh-btn:hover { background: rgba(255,255,255,0.3); }
+
+    /* ── Layout ── */
+    .container { max-width: 960px; margin: 0 auto; padding: 16px; }
+
+    /* ── Card ── */
+    .card {
+      background: var(--card);
+      border-radius: var(--radius);
+      padding: 16px;
+      margin-bottom: 16px;
+      box-shadow: 0 1px 4px rgba(0,0,0,0.06);
+    }
+    .card-title {
+      font-size: 11px;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.9px;
+      color: var(--muted);
+      margin-bottom: 14px;
+    }
+
+    /* ── Nutrition ── */
+    .nutrition-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+      gap: 14px;
+    }
+    .nutrient { }
+    .nutrient-row {
+      display: flex;
+      justify-content: space-between;
+      font-size: 13px;
+      margin-bottom: 5px;
+    }
+    .nutrient-name { font-weight: 600; }
+    .nutrient-val   { color: var(--muted); }
+    .progress-track {
+      height: 7px;
+      background: var(--border);
+      border-radius: 4px;
+      overflow: hidden;
+    }
+    .progress-fill {
+      height: 100%;
+      background: var(--accent-2);
+      border-radius: 4px;
+      transition: width 0.4s ease;
+    }
+    .progress-fill.over { background: var(--warn); }
+
+    /* ── Tabs ── */
+    .tabs {
+      display: flex;
+      gap: 6px;
+      margin-bottom: 14px;
+      flex-wrap: wrap;
+    }
+    .tab {
+      padding: 5px 14px;
+      border-radius: 20px;
+      border: 1.5px solid var(--border);
+      background: transparent;
+      color: var(--muted);
+      cursor: pointer;
+      font-size: 13px;
+      font-weight: 500;
+      transition: all 0.15s;
+    }
+    .tab.active {
+      background: var(--accent);
+      border-color: var(--accent);
+      color: #fff;
+    }
+    .tab-panel { display: none; }
+    .tab-panel.active { display: block; }
+
+    /* ── Ingredient list ── */
+    .item-list { list-style: none; }
+    .item {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 9px 0;
+      border-bottom: 1px solid var(--border);
+      gap: 8px;
+    }
+    .item:last-child { border-bottom: none; }
+    .item-name { font-weight: 500; }
+    .item-meta {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      flex-shrink: 0;
+    }
+    .item-qty { color: var(--muted); font-size: 13px; }
+    .badge {
+      font-size: 11px;
+      padding: 2px 7px;
+      border-radius: 10px;
+      font-weight: 600;
+      white-space: nowrap;
+    }
+    .badge-warn   { background: var(--warn-soft);   color: #856404; }
+    .badge-urgent { background: var(--warn-softer);  color: #842029; }
+    .badge-tag    { background: var(--border);        color: var(--muted); }
+
+    /* ── Meal list ── */
+    .meal {
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-start;
+      padding: 10px 0;
+      border-bottom: 1px solid var(--border);
+      gap: 8px;
+    }
+    .meal:last-child { border-bottom: none; }
+    .meal-name { font-weight: 500; margin-bottom: 3px; }
+    .meal-portions {
+      font-size: 14px;
+      font-weight: 700;
+      color: var(--accent);
+      flex-shrink: 0;
+    }
+
+    /* ── Delivery history ── */
+    .delivery-item {
+      display: flex;
+      justify-content: space-between;
+      padding: 8px 0;
+      border-bottom: 1px solid var(--border);
+      font-size: 13px;
+    }
+    .delivery-item:last-child { border-bottom: none; }
+    .delivery-source { font-weight: 500; }
+    .delivery-meta   { color: var(--muted); }
+
+    /* ── Empty state ── */
+    .empty {
+      text-align: center;
+      color: var(--muted);
+      padding: 24px 0;
+      font-size: 14px;
+    }
+
+    /* ── Loading ── */
+    .loading { color: var(--muted); font-size: 13px; }
+  </style>
+</head>
+<body>
+
+<header>
+  <h1>Puffin</h1>
+  <time id="header-date"></time>
+  <button id="refresh-btn" onclick="loadAll()">Refresh</button>
+</header>
+
+<div class="container">
+
+  <!-- Nutrition -->
+  <div class="card">
+    <div class="card-title">Today's nutrition</div>
+    <div class="nutrition-grid" id="nutrition-content">
+      <div class="loading">Loading...</div>
+    </div>
+  </div>
+
+  <!-- Inventory -->
+  <div class="card">
+    <div class="card-title">Inventory</div>
+    <div class="tabs">
+      <button class="tab active" data-loc="fridge"  onclick="switchTab('fridge')">Fridge</button>
+      <button class="tab"        data-loc="freezer" onclick="switchTab('freezer')">Freezer</button>
+      <button class="tab"        data-loc="pantry"  onclick="switchTab('pantry')">Pantry</button>
+    </div>
+    <div id="panel-fridge"  class="tab-panel active"><div class="loading">Loading...</div></div>
+    <div id="panel-freezer" class="tab-panel"><div class="loading">Loading...</div></div>
+    <div id="panel-pantry"  class="tab-panel"><div class="loading">Loading...</div></div>
+  </div>
+
+  <!-- Freezer meals -->
+  <div class="card">
+    <div class="card-title">Freezer meals</div>
+    <div id="meals-content"><div class="loading">Loading...</div></div>
+  </div>
+
+  <!-- Delivery history -->
+  <div class="card">
+    <div class="card-title">Delivery history</div>
+    <div id="delivery-content"><div class="loading">Loading...</div></div>
+  </div>
+
+</div>
+
+<script>
+  const TODAY = new Date();
+
+  // Header date
+  document.getElementById('header-date').textContent =
+    TODAY.toLocaleDateString('en-GB', { weekday: 'long', day: 'numeric', month: 'long' });
+
+  function daysUntil(iso) {
+    if (!iso) return null;
+    const d = new Date(iso + 'T00:00:00');
+    return Math.ceil((d - TODAY) / 86400000);
+  }
+
+  async function loadAll() {
+    document.getElementById('refresh-btn').textContent = '...';
+    try {
+      const [nutrition, fridge, freezer, pantry, meals, deliveries] = await Promise.all([
+        fetch('/api/nutrition/summary?period=today').then(r => r.json()),
+        fetch('/api/inventory?location=fridge').then(r => r.json()),
+        fetch('/api/inventory?location=freezer').then(r => r.json()),
+        fetch('/api/inventory?location=pantry').then(r => r.json()),
+        fetch('/api/meals?location=freezer').then(r => r.json()),
+        fetch('/api/delivery-schedule').then(r => r.json()),
+      ]);
+      renderNutrition(nutrition);
+      renderPanel('fridge',  fridge.ingredients  || []);
+      renderPanel('freezer', freezer.ingredients || []);
+      renderPanel('pantry',  pantry.ingredients  || []);
+      renderMeals(meals.meals || []);
+      renderDeliveries(deliveries.schedules || []);
+    } catch (e) {
+      console.error(e);
+    }
+    document.getElementById('refresh-btn').textContent = 'Refresh';
+  }
+
+  function renderNutrition(data) {
+    const el = document.getElementById('nutrition-content');
+    const { totals, targets } = data;
+    const nutrients = [
+      { label: 'Calories', total: totals.calories,   target: targets.calories,   unit: 'kcal' },
+      { label: 'Protein',  total: totals.protein_g,  target: targets.protein_g,  unit: 'g'    },
+      { label: 'Fibre',    total: totals.fibre_g,     target: targets.fibre_g,    unit: 'g'    },
+    ];
+    el.innerHTML = nutrients.map(n => {
+      const val = Math.round(n.total);
+      const tgt = Math.round(n.target);
+      const pct = Math.min((val / tgt) * 100, 100).toFixed(1);
+      const over = val > tgt;
+      return `<div class="nutrient">
+        <div class="nutrient-row">
+          <span class="nutrient-name">${n.label}</span>
+          <span class="nutrient-val">${val} / ${tgt}${n.unit}</span>
+        </div>
+        <div class="progress-track">
+          <div class="progress-fill ${over ? 'over' : ''}" style="width:${pct}%"></div>
+        </div>
+      </div>`;
+    }).join('');
+  }
+
+  function renderPanel(loc, items) {
+    const el = document.getElementById('panel-' + loc);
+    if (!items.length) {
+      el.innerHTML = '<div class="empty">Nothing here</div>';
+      return;
+    }
+    // Sort: expiring soonest first, then alphabetical
+    items.sort((a, b) => {
+      const da = a.best_before ? daysUntil(a.best_before) : 999;
+      const db = b.best_before ? daysUntil(b.best_before) : 999;
+      return da !== db ? da - db : a.name.localeCompare(b.name);
+    });
+    el.innerHTML = '<ul class="item-list">' + items.map(renderIngredient).join('') + '</ul>';
+  }
+
+  function renderIngredient(item) {
+    const days = daysUntil(item.best_before);
+    let badge = '';
+    if (days !== null) {
+      if (days <= 0)      badge = '<span class="badge badge-urgent">Expired</span>';
+      else if (days === 1) badge = '<span class="badge badge-urgent">Tomorrow</span>';
+      else if (days <= 3)  badge = `<span class="badge badge-warn">${days}d</span>`;
+    }
+    const qty = item.quantity % 1 === 0 ? item.quantity : (+item.quantity.toFixed(1));
+    return `<li class="item">
+      <span class="item-name">${item.name}</span>
+      <span class="item-meta">
+        ${badge}
+        <span class="item-qty">${qty}${item.unit}</span>
+      </span>
+    </li>`;
+  }
+
+  function renderMeals(meals) {
+    const el = document.getElementById('meals-content');
+    if (!meals.length) {
+      el.innerHTML = '<div class="empty">No meals in the freezer</div>';
+      return;
+    }
+    el.innerHTML = meals.map(m => `
+      <div class="meal">
+        <div>
+          <div class="meal-name">${m.name}</div>
+          <span class="badge badge-tag">${m.cuisine_tag}</span>
+        </div>
+        <span class="meal-portions">${m.portions_remaining}<span style="font-weight:400;color:var(--muted)">/${m.total_portions}</span></span>
+      </div>`).join('');
+  }
+
+  function renderDeliveries(schedules) {
+    const el = document.getElementById('delivery-content');
+    if (!schedules.length) {
+      el.innerHTML = '<div class="empty">No scrape history yet</div>';
+      return;
+    }
+    el.innerHTML = schedules.map(s => {
+      const d = new Date(s.scraped_at).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' });
+      return `<div class="delivery-item">
+        <span class="delivery-source">${s.source_label.replace(/_/g, ' ')}</span>
+        <span class="delivery-meta">${s.item_count} items &middot; ${d}</span>
+      </div>`;
+    }).join('');
+  }
+
+  function switchTab(loc) {
+    document.querySelectorAll('.tab').forEach(t =>
+      t.classList.toggle('active', t.dataset.loc === loc));
+    document.querySelectorAll('.tab-panel').forEach(p =>
+      p.classList.toggle('active', p.id === 'panel-' + loc));
+  }
+
+  loadAll();
+</script>
+</body>
+</html>
