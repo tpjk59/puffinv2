@@ -27,9 +27,15 @@ def list_all() -> dict[str, FoodSource]:
 
 
 # --- built-in source registrations ---
+# Import order matters: each import triggers module-level side-effects;
+# keep sources that have no inter-source dependencies at the top.
 
-from sources.manual import ManualSource  # noqa: E402  (import after functions to avoid circularity)
+from sources.manual import ManualSource      # noqa: E402
+from sources.camera import CameraSource      # noqa: E402
+from sources.veg_box import VegBoxSource     # noqa: E402
+from sources.meat_box import MeatBoxSource   # noqa: E402
 
 register(ManualSource())
-
-# TODO: register CameraSource, VegBoxSource, MeatBoxSource here once implemented in Phase 2
+register(CameraSource())
+register(VegBoxSource())
+register(MeatBoxSource())

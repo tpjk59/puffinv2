@@ -27,6 +27,7 @@ class Ingredient(Base):
     calories_per_100g: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
     protein_per_100g: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
     fibre_per_100g: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    notes: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
 
     meal_uses: Mapped[list["MealIngredient"]] = relationship(
         "MealIngredient", back_populates="ingredient"
@@ -58,12 +59,15 @@ class MealIngredient(Base):
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     meal_id: Mapped[int] = mapped_column(ForeignKey("meals.id"), nullable=False)
-    ingredient_id: Mapped[int] = mapped_column(ForeignKey("ingredients.id"), nullable=False)
+    # Nullable so history survives when an ingredient is later deleted from inventory
+    ingredient_id: Mapped[Optional[int]] = mapped_column(
+        ForeignKey("ingredients.id", ondelete="SET NULL"), nullable=True
+    )
     quantity_used: Mapped[float] = mapped_column(Float, nullable=False)
     unit: Mapped[str] = mapped_column(String(50), nullable=False)
 
     meal: Mapped["Meal"] = relationship("Meal", back_populates="ingredients")
-    ingredient: Mapped["Ingredient"] = relationship("Ingredient", back_populates="meal_uses")
+    ingredient: Mapped[Optional["Ingredient"]] = relationship("Ingredient", back_populates="meal_uses")
 
 
 class NutritionLog(Base):

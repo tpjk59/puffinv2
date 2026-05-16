@@ -42,3 +42,41 @@ Description: {text}
 
 Return ONLY a valid JSON array with no surrounding text or markdown fences.\
 """
+
+CAMERA_SOURCE_PROMPT = """\
+You are analysing a photograph of food ingredients, a fridge, or a cupboard.
+Today's date is {today}.
+
+Identify all visible ingredients and return a JSON array. Each object must have:
+- name: ingredient name using British terms (courgette not zucchini, \
+aubergine not eggplant, coriander not cilantro, etc.)
+- quantity: estimated numeric amount (float) — estimate if not countable
+- unit: g, kg, ml, l, whole, bunch, tin, or another appropriate unit
+- location: "fridge", "freezer", or "pantry" — infer from context, default "fridge"
+- best_before: ISO date YYYY-MM-DD if a date label is visible, otherwise null
+- notes: confidence level as "confidence:high", "confidence:medium", or \
+"confidence:low", plus any quality observations separated by semicolons
+
+Return ONLY a valid JSON array with no surrounding text or markdown fences.\
+"""
+
+WEB_SCRAPER_PARSE_PROMPT = """\
+You are parsing the content of a food delivery website to identify incoming ingredients.
+Today's date is {today}. Source: {source_label}.
+
+From the page content below, extract all food items being delivered.
+Return a JSON array where each object has:
+- name: ingredient name using British terms
+- quantity: numeric amount (float)
+- unit: g, kg, ml, l, whole, bunch, tin, or another appropriate unit
+- location: where it should be stored — "fridge", "freezer", or "pantry"
+- best_before: ISO date YYYY-MM-DD if visible, otherwise null
+- notes: any relevant notes, or null
+
+If no ingredients can be identified, return an empty array [].
+
+Page content:
+{content}
+
+Return ONLY a valid JSON array with no surrounding text or markdown fences.\
+"""

@@ -35,6 +35,7 @@ async def create_ingredient(
     calories_per_100g: Optional[float] = None,
     protein_per_100g: Optional[float] = None,
     fibre_per_100g: Optional[float] = None,
+    notes: Optional[str] = None,
 ) -> Ingredient:
     ingredient = Ingredient(
         name=name,
@@ -49,6 +50,7 @@ async def create_ingredient(
         calories_per_100g=calories_per_100g,
         protein_per_100g=protein_per_100g,
         fibre_per_100g=fibre_per_100g,
+        notes=notes,
     )
     session.add(ingredient)
     await session.commit()
