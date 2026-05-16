@@ -26,11 +26,9 @@ primary_region = "fra"
   source = "puffin_data"
   destination = "/data"
 
-[[checks]]
+[[http_service.checks]]
   grace_period = "10s"
   interval = "30s"
   method = "GET"
   path = "/health"
-  port = 8080
   timeout = "5s"
-  type = "http"
