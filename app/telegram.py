@@ -94,15 +94,36 @@ async def handle_update(update: dict, session: AsyncSession) -> None:
         if "photo" in message:
             file_id = message["photo"][-1]["file_id"]
             image_b64, media_type = await _download_file_b64(bot_token, file_id)
-            user_text = (
-                message.get("caption")
-                or "Here's a photo of some food. Please identify the ingredients."
-            )
-            _log.info("photo message from chat %s (caption: %s)", chat_id, user_text[:80])
-            response_text = await run_agent(
-                user_text, session, image_b64=image_b64, media_type=media_type,
-                history=history,
-            )
+            caption = message.get("caption") or ""
+            _log.info("photo message from chat %s (caption: %s)", chat_id, caption[:80])
+            # Process the image directly — never pass base64 into the agent loop
+            # as the model would have to re-output it as a tool parameter (huge tokens).
+            from sources.camera import CameraSource
+            arrivals = await CameraSource().fetch(image_b64=image_b64, media_type=media_type)
+            if arrivals:
+                lines = []
+                for a in arrivals:
+                    line = f"- {a.name}: {a.quantity} {a.unit}, {a.location}"
+                    if a.best_before:
+                        line += f", best before {a.best_before}"
+                    if a.notes:
+                        line += f" [{a.notes}]"
+                    lines.append(line)
+                items_text = "\n".join(lines)
+                user_text = (
+                    f"I scanned the photo and identified these items:\n{items_text}\n\n"
+                    + (f"User caption: {caption}\n\n" if caption else "")
+                    + "Show this list to the user and ask them to confirm. "
+                    "Once confirmed, save everything in one call with "
+                    "fetch_from_source(source_label='manual')."
+                )
+            else:
+                user_text = (
+                    "I scanned the photo but couldn't identify any ingredients clearly. "
+                    + (f"User caption: {caption}\n\n" if caption else "")
+                    + "Let the user know and ask them to describe what they bought."
+                )
+            response_text = await run_agent(user_text, session, history=history)
         elif "text" in message:
             user_text = message["text"]
             _log.info("text message from chat %s: %s", chat_id, user_text[:120])
