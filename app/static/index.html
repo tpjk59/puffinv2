@@ -340,6 +340,12 @@
     <div id="week-plan-content"><div class="loading">Loading...</div></div>
   </div>
 
+  <!-- Shopping list -->
+  <div class="card">
+    <div class="card-title">Shopping list</div>
+    <div id="shopping-content"><div class="loading">Loading...</div></div>
+  </div>
+
   <!-- Cook plan -->
   <div class="card">
     <div class="card-title">Cook plan</div>
@@ -414,7 +420,7 @@
     renderDeliveries(deliveries.status === 'fulfilled' ? (deliveries.value.schedules || []) : []);
 
     document.getElementById('refresh-btn').textContent = 'Refresh';
-    await Promise.all([loadWeekPlan(), loadCookPlan()]);
+    await Promise.all([loadWeekPlan(), loadCookPlan(), loadShoppingList()]);
   }
 
   async function loadWeekPlan() {
@@ -441,6 +447,41 @@
     } catch (e) {
       document.getElementById('cook-plan-content').innerHTML = '<div class="empty">Could not load cook plan</div>';
     }
+  }
+
+  async function loadShoppingList() {
+    document.getElementById('shopping-content').innerHTML = '<div class="loading">Loading...</div>';
+    try {
+      const data = await safeFetch('/api/shopping-list');
+      renderShoppingList(data);
+    } catch (e) {
+      document.getElementById('shopping-content').innerHTML = '<div class="empty">Could not load shopping list</div>';
+    }
+  }
+
+  function renderShoppingList(data) {
+    const el = document.getElementById('shopping-content');
+    const items = data.shopping_list || [];
+    if (data.message || !items.length) {
+      el.innerHTML = '<div class="empty">Nothing to buy — all planned meals are covered</div>';
+      return;
+    }
+    const toBuy = items.filter(i => i.quantity_to_buy > 0);
+    if (!toBuy.length) {
+      el.innerHTML = '<div class="empty">Nothing to buy — all planned meals are covered</div>';
+      return;
+    }
+    el.innerHTML = toBuy.map(i => {
+      const qty = i.quantity_to_buy % 1 === 0 ? i.quantity_to_buy : i.quantity_to_buy.toFixed(1);
+      const meals = i.from_plans.join(', ');
+      return `<div style="display:flex;justify-content:space-between;align-items:flex-start;padding:8px 0;border-bottom:1px solid var(--border)">
+        <div>
+          <div style="font-size:14px;font-weight:500">${i.name}</div>
+          <div style="font-size:11px;color:var(--muted);margin-top:2px">${meals}</div>
+        </div>
+        <div style="font-size:13px;color:var(--warn);font-weight:600;white-space:nowrap;margin-left:12px">${qty}${i.unit}</div>
+      </div>`;
+    }).join('');
   }
 
   function renderPanel(loc, items) {

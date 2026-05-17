@@ -158,6 +158,13 @@ async def api_cook_plan(
         return await get_meal_plan(session, from_date=from_date, to_date=to_date, meal_type="batch_cook")
 
 
+@app.get("/api/shopping-list")
+async def api_shopping_list(week_start: Optional[str] = Query(None)):
+    from agent.tools import get_shopping_list
+    async with AsyncSessionLocal() as session:
+        return await get_shopping_list(session, week_start=week_start)
+
+
 # ---------------------------------------------------------------------------
 # Telegram webhook
 # ---------------------------------------------------------------------------
