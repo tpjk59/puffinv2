@@ -48,7 +48,7 @@ class Meal(Base):
     notes: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
 
     ingredients: Mapped[list["MealIngredient"]] = relationship(
-        "MealIngredient", back_populates="meal"
+        "MealIngredient", back_populates="meal", cascade="all, delete-orphan"
     )
     nutrition_logs: Mapped[list["NutritionLog"]] = relationship(
         "NutritionLog", back_populates="source_meal"
