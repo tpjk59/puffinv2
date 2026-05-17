@@ -46,20 +46,6 @@ async def test_api_meals_returns_list(client: AsyncClient) -> None:
     assert isinstance(data["meals"], list)
 
 
-async def test_api_nutrition_summary_today(client: AsyncClient) -> None:
-    r = await client.get("/api/nutrition/summary?period=today")
-    assert r.status_code == 200
-    data = r.json()
-    assert "totals" in data
-    assert "targets" in data
-    assert data["period"] == "today"
-
-
-async def test_api_nutrition_summary_week(client: AsyncClient) -> None:
-    r = await client.get("/api/nutrition/summary?period=week")
-    assert r.status_code == 200
-    assert r.json()["period"] == "week"
-
 
 async def test_api_preferences_returns_dict(client: AsyncClient) -> None:
     r = await client.get("/api/preferences")

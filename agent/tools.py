@@ -17,7 +17,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 import sources.registry as registry
 from agent.prompts import RECIPE_PARSE_PROMPT
 from db import crud
-from nutrition.lookup import fetch_nutrition
 
 _anthropic_client = anthropic.AsyncAnthropic()
 _RECIPE_PARSE_MODEL = "claude-haiku-4-5-20251001"
@@ -258,11 +257,13 @@ async def log_meal_cooked(
 async def log_meal_eaten(
     session: AsyncSession,
     meal_id: int,
-    calories: float,
-    protein_g: float,
-    fibre_g: float,
     portions: int = 1,
 ) -> dict:
+    """Decrement portions for a batch-cooked meal.
+
+    After calling this, also log nutrition to MacroFactor using mf_log_food
+    (search the database) or mf_log_manual_food (if you know the macros directly).
+    """
     meal = await crud.get_meal(session, meal_id)
     if meal is None:
         return {"error": f"Meal {meal_id} not found"}
@@ -271,19 +272,11 @@ async def log_meal_eaten(
             "error": f"Only {meal.portions_remaining} portion(s) remaining, cannot eat {portions}"
         }
     new_portions = meal.portions_remaining - portions
-    log = await crud.create_nutrition_log(
-        session,
-        log_date=date.today(),
-        calories=calories,
-        protein_g=protein_g,
-        fibre_g=fibre_g,
-        source_meal_id=meal_id,
-    )
     if new_portions <= 0:
         await crud.delete_meal(session, meal_id)
-        return {"status": "fully eaten and removed", "nutrition_log_id": log.id}
+        return {"status": "fully eaten and removed", "meal_name": meal.name}
     await crud.update_meal(session, meal_id, {"portions_remaining": new_portions})
-    return {"portions_remaining": new_portions, "nutrition_log_id": log.id}
+    return {"portions_remaining": new_portions, "meal_name": meal.name}
 
 
 async def get_meal_history(
@@ -301,34 +294,6 @@ async def delete_meal(session: AsyncSession, meal_id: int) -> dict:
     if not deleted:
         return {"error": f"Meal {meal_id} not found"}
     return {"status": "deleted", "meal_id": meal_id}
-
-
-async def get_nutrition_summary(
-    session: AsyncSession,
-    period: str = "today",
-) -> dict:
-    today = date.today()
-    start = today if period == "today" else today - timedelta(days=6)
-    logs = await crud.list_nutrition_logs(session, start_date=start, end_date=today)
-    prefs = await crud.get_all_preferences(session)
-
-    totals = {
-        "calories": sum(l.calories for l in logs),
-        "protein_g": sum(l.protein_g for l in logs),
-        "fibre_g": sum(l.fibre_g for l in logs),
-    }
-    def _pref_float(key: str, default: float) -> float:
-        try:
-            return float(prefs.get(key, default))
-        except (ValueError, TypeError):
-            return default
-
-    targets = {
-        "calories": _pref_float("calorie_target", 2200),
-        "protein_g": _pref_float("protein_target_g", 140),
-        "fibre_g": _pref_float("fibre_target_g", 30),
-    }
-    return {"period": period, "totals": totals, "targets": targets, "log_count": len(logs)}
 
 
 async def get_preferences(session: AsyncSession) -> dict:
@@ -418,32 +383,6 @@ async def list_sources(session: AsyncSession) -> dict:
             for label, source in sorted(sources.items())
         ]
     }
-
-
-async def lookup_nutrition(
-    session: AsyncSession,
-    ingredient_name: str,
-    ingredient_id: Optional[int] = None,
-) -> dict:
-    """Look up per-100g nutrition from USDA / Open Food Facts.
-
-    If ingredient_id is given, persists the result to that ingredient record.
-    """
-    data = await fetch_nutrition(ingredient_name)
-    if data is None:
-        return {"error": f"No nutrition data found for '{ingredient_name}'"}
-    if ingredient_id is not None:
-        await crud.update_ingredient(
-            session,
-            ingredient_id,
-            {
-                "calories_per_100g": data["calories_per_100g"],
-                "protein_per_100g": data["protein_per_100g"],
-                "fibre_per_100g": data["fibre_per_100g"],
-            },
-        )
-        data["saved_to_ingredient_id"] = ingredient_id
-    return data
 
 
 async def get_delivery_schedule(
@@ -945,13 +884,11 @@ _HANDLERS = {
     "log_meal_eaten": log_meal_eaten,
     "delete_meal": delete_meal,
     "get_meal_history": get_meal_history,
-    "get_nutrition_summary": get_nutrition_summary,
     "get_preferences": get_preferences,
     "set_preference": set_preference,
     "fetch_from_source": fetch_from_source,
     "inventory_from_image": inventory_from_image,
     "list_sources": list_sources,
-    "lookup_nutrition": lookup_nutrition,
     "get_delivery_schedule": get_delivery_schedule,
     "plan_meal": plan_meal,
     "get_meal_plan": get_meal_plan,
@@ -1097,17 +1034,17 @@ TOOL_DEFINITIONS: list[dict] = [
     },
     {
         "name": "log_meal_eaten",
-        "description": "Mark portions of a meal as eaten and log the nutrition.",
+        "description": (
+            "Mark portions of a batch-cooked meal as eaten (decrements Puffin's portion counter). "
+            "After calling this, log nutrition to MacroFactor using mf_log_food or mf_log_manual_food."
+        ),
         "input_schema": {
             "type": "object",
             "properties": {
                 "meal_id": {"type": "integer"},
-                "portions": {"type": "integer", "description": "Defaults to 1."},
-                "calories": {"type": "number"},
-                "protein_g": {"type": "number"},
-                "fibre_g": {"type": "number"},
+                "portions": {"type": "integer", "description": "Number of portions eaten. Defaults to 1."},
             },
-            "required": ["meal_id", "calories", "protein_g", "fibre_g"],
+            "required": ["meal_id"],
         },
     },
     {
@@ -1133,20 +1070,6 @@ TOOL_DEFINITIONS: list[dict] = [
         },
     },
     {
-        "name": "get_nutrition_summary",
-        "description": "Total calories, protein, and fibre for today or this week vs. targets.",
-        "input_schema": {
-            "type": "object",
-            "properties": {
-                "period": {
-                    "type": "string",
-                    "enum": ["today", "week"],
-                    "description": "Defaults to 'today'.",
-                },
-            },
-        },
-    },
-    {
         "name": "get_preferences",
         "description": "Retrieve all user preferences. Always call this before making meal suggestions.",
         "input_schema": {"type": "object", "properties": {}},
@@ -1155,10 +1078,8 @@ TOOL_DEFINITIONS: list[dict] = [
         "name": "set_preference",
         "description": (
             "Update a user preference. "
-            "Numeric preferences (calorie_target, protein_target_g, fibre_target_g, "
-            "weekday_max_cook_minutes, weekend_max_cook_minutes, batch_cook_portions_target) "
-            "must be stored as a single number, not a range. "
-            "If the user gives a range (e.g. '1400-1600 kcal'), use the midpoint (1500)."
+            "Numeric preferences (weekday_max_cook_minutes, weekend_max_cook_minutes, "
+            "batch_cook_portions_target) must be stored as a single number, not a range."
         ),
         "input_schema": {
             "type": "object",
@@ -1217,28 +1138,6 @@ TOOL_DEFINITIONS: list[dict] = [
         "name": "list_sources",
         "description": "List all registered food sources and their descriptions.",
         "input_schema": {"type": "object", "properties": {}},
-    },
-    {
-        "name": "lookup_nutrition",
-        "description": (
-            "Look up per-100g calories, protein, and fibre for an ingredient "
-            "from USDA FoodData Central (falls back to Open Food Facts for British packaged products). "
-            "Pass ingredient_id to save the result to that inventory record."
-        ),
-        "input_schema": {
-            "type": "object",
-            "properties": {
-                "ingredient_name": {
-                    "type": "string",
-                    "description": "Name to search for, e.g. 'courgette', 'chicken thigh'.",
-                },
-                "ingredient_id": {
-                    "type": "integer",
-                    "description": "If provided, saves the looked-up data to this ingredient.",
-                },
-            },
-            "required": ["ingredient_name"],
-        },
     },
     {
         "name": "get_delivery_schedule",

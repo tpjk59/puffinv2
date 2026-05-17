@@ -107,12 +107,6 @@ async def api_meals(location: Optional[str] = Query(None)):
         return await get_meal_history(session, location=location)
 
 
-@app.get("/api/nutrition/summary")
-async def api_nutrition_summary(period: str = Query("today")):
-    from agent.tools import get_nutrition_summary
-    async with AsyncSessionLocal() as session:
-        return await get_nutrition_summary(session, period=period)
-
 
 @app.get("/api/preferences")
 async def api_preferences():

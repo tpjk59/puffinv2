@@ -5,15 +5,18 @@ import json
 import anthropic
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from agent.prompts import SYSTEM_PROMPT
+from agent.mcp import MF_TOOL_PREFIX, call_mf_tool, get_mf_tool_definitions, mf_configured
+from agent.prompts import SYSTEM_PROMPT, SYSTEM_PROMPT_NO_NUTRITION
 from agent.tools import TOOL_DEFINITIONS, dispatch_tool
 
 _MODEL = "claude-sonnet-4-6"
 _MAX_TOKENS = 8192
 
-# System prompt is cached as an ephemeral prefix — saved on every subsequent turn.
 _SYSTEM_CACHED = [
     {"type": "text", "text": SYSTEM_PROMPT, "cache_control": {"type": "ephemeral"}}
+]
+_SYSTEM_NO_NUTRITION_CACHED = [
+    {"type": "text", "text": SYSTEM_PROMPT_NO_NUTRITION, "cache_control": {"type": "ephemeral"}}
 ]
 
 
@@ -47,12 +50,21 @@ async def run_agent(
     messages: list[dict] = list(history or [])
     messages.append({"role": "user", "content": content})
 
+    # Build tool list: always include Puffin tools; add MacroFactor MCP tools when configured.
+    tools = list(TOOL_DEFINITIONS)
+    system = _SYSTEM_CACHED
+    if mf_configured():
+        mf_tools = await get_mf_tool_definitions()
+        tools.extend(mf_tools)
+    else:
+        system = _SYSTEM_NO_NUTRITION_CACHED
+
     while True:
         response = await client.messages.create(
             model=_MODEL,
             max_tokens=_MAX_TOKENS,
-            system=_SYSTEM_CACHED,
-            tools=TOOL_DEFINITIONS,
+            system=system,
+            tools=tools,
             messages=messages,
         )
 
@@ -75,7 +87,11 @@ async def run_agent(
             if block.type != "tool_use":
                 continue
             try:
-                result = await dispatch_tool(block.name, block.input, session)
+                if block.name.startswith(MF_TOOL_PREFIX):
+                    # Strip prefix before forwarding to MCP server
+                    result = await call_mf_tool(block.name[len(MF_TOOL_PREFIX):], block.input)
+                else:
+                    result = await dispatch_tool(block.name, block.input, session)
             except Exception as exc:  # noqa: BLE001
                 result = {"error": str(exc)}
             tool_results.append(

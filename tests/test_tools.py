@@ -165,15 +165,22 @@ async def test_log_meal_eaten_decrements_portions(db_session: AsyncSession) -> N
         cooked_date=date.today(), total_portions=4, portions_remaining=4,
         location="freezer",
     )
-    result = await tools.log_meal_eaten(
-        db_session, meal_id=meal.id, portions=1, calories=450, protein_g=25, fibre_g=8
-    )
+    result = await tools.log_meal_eaten(db_session, meal_id=meal.id, portions=1)
     assert result["portions_remaining"] == 3
+    assert result["meal_name"] == "Dal"
     updated = await crud.get_meal(db_session, meal.id)
     assert updated.portions_remaining == 3
-    logs = await crud.list_nutrition_logs(db_session)
-    assert len(logs) == 1
-    assert logs[0].calories == 450.0
+
+
+async def test_log_meal_eaten_removes_when_fully_eaten(db_session: AsyncSession) -> None:
+    meal = await crud.create_meal(
+        db_session, name="Dal", cuisine_tag="south-asian",
+        cooked_date=date.today(), total_portions=2, portions_remaining=2,
+        location="freezer",
+    )
+    result = await tools.log_meal_eaten(db_session, meal_id=meal.id, portions=2)
+    assert result["status"] == "fully eaten and removed"
+    assert await crud.get_meal(db_session, meal.id) is None
 
 
 async def test_log_meal_eaten_insufficient_portions(db_session: AsyncSession) -> None:
@@ -182,16 +189,12 @@ async def test_log_meal_eaten_insufficient_portions(db_session: AsyncSession) ->
         cooked_date=date.today(), total_portions=2, portions_remaining=1,
         location="fresh",
     )
-    result = await tools.log_meal_eaten(
-        db_session, meal_id=meal.id, portions=3, calories=300, protein_g=15, fibre_g=5
-    )
+    result = await tools.log_meal_eaten(db_session, meal_id=meal.id, portions=3)
     assert "error" in result
 
 
 async def test_log_meal_eaten_meal_not_found(db_session: AsyncSession) -> None:
-    result = await tools.log_meal_eaten(
-        db_session, meal_id=9999, portions=1, calories=400, protein_g=20, fibre_g=6
-    )
+    result = await tools.log_meal_eaten(db_session, meal_id=9999, portions=1)
     assert "error" in result
 
 
@@ -215,40 +218,6 @@ async def test_get_meal_history(db_session: AsyncSession) -> None:
     freezer = await tools.get_meal_history(db_session, location="freezer")
     assert len(freezer["meals"]) == 1
     assert freezer["meals"][0]["name"] == "Dal"
-
-
-# ---------------------------------------------------------------------------
-# get_nutrition_summary
-# ---------------------------------------------------------------------------
-
-
-async def test_get_nutrition_summary_today(db_session: AsyncSession) -> None:
-    await crud.create_nutrition_log(
-        db_session, log_date=date.today(), calories=2000, protein_g=130, fibre_g=25
-    )
-    await crud.set_preference(db_session, "calorie_target", "2200")
-    await crud.set_preference(db_session, "protein_target_g", "140")
-    await crud.set_preference(db_session, "fibre_target_g", "30")
-
-    result = await tools.get_nutrition_summary(db_session, period="today")
-    assert result["totals"]["calories"] == 2000.0
-    assert result["targets"]["calories"] == 2200.0
-    assert result["period"] == "today"
-
-
-async def test_get_nutrition_summary_week(db_session: AsyncSession) -> None:
-    today = date.today()
-    for i in range(3):
-        await crud.create_nutrition_log(
-            db_session,
-            log_date=today - timedelta(days=i),
-            calories=2100,
-            protein_g=135,
-            fibre_g=28,
-        )
-    result = await tools.get_nutrition_summary(db_session, period="week")
-    assert result["totals"]["calories"] == 6300.0
-    assert result["log_count"] == 3
 
 
 # ---------------------------------------------------------------------------
@@ -397,53 +366,6 @@ async def test_fetch_from_source_records_delivery_schedule(db_session: AsyncSess
         assert schedules[0].source_label == "manual"
     finally:
         reg._registry["manual"] = original
-
-
-# ---------------------------------------------------------------------------
-# lookup_nutrition
-# ---------------------------------------------------------------------------
-
-
-async def test_lookup_nutrition_returns_data(db_session: AsyncSession) -> None:
-    from unittest.mock import patch, AsyncMock as AM
-    nutrition_data = {
-        "calories_per_100g": 17.0, "protein_per_100g": 1.2,
-        "fibre_per_100g": 1.1, "source": "usda", "food_name": "Courgette",
-    }
-    with patch("agent.tools.fetch_nutrition", AM(return_value=nutrition_data)):
-        result = await tools.lookup_nutrition(db_session, ingredient_name="courgette")
-    assert result["calories_per_100g"] == 17.0
-    assert result["source"] == "usda"
-
-
-async def test_lookup_nutrition_saves_to_ingredient(db_session: AsyncSession) -> None:
-    from unittest.mock import patch, AsyncMock as AM
-    ing = await crud.create_ingredient(
-        db_session, name="courgette", quantity=3, unit="whole",
-        source_label="manual", location="fresh", arrived_date=date.today(),
-    )
-    assert ing.calories_per_100g is None
-
-    nutrition_data = {
-        "calories_per_100g": 17.0, "protein_per_100g": 1.2,
-        "fibre_per_100g": 1.1, "source": "usda", "food_name": "Courgette",
-    }
-    with patch("agent.tools.fetch_nutrition", AM(return_value=nutrition_data)):
-        result = await tools.lookup_nutrition(
-            db_session, ingredient_name="courgette", ingredient_id=ing.id
-        )
-    assert result["saved_to_ingredient_id"] == ing.id
-
-    updated = await crud.get_ingredient(db_session, ing.id)
-    assert updated.calories_per_100g == 17.0
-    assert updated.protein_per_100g == 1.2
-
-
-async def test_lookup_nutrition_not_found(db_session: AsyncSession) -> None:
-    from unittest.mock import patch, AsyncMock as AM
-    with patch("agent.tools.fetch_nutrition", AM(return_value=None)):
-        result = await tools.lookup_nutrition(db_session, ingredient_name="xyzzy123")
-    assert "error" in result
 
 
 # ---------------------------------------------------------------------------
