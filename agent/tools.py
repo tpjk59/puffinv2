@@ -912,6 +912,177 @@ async def mark_recipe_planned(
     return {"recipe": _recipe_to_dict(updated)}
 
 
+def _match_inventory(
+    recipe_name: str,
+    inventory: list,
+) -> list:
+    """Return inventory items whose name plausibly matches a recipe ingredient name.
+
+    Tries exact lowercase match, then substring containment in either direction.
+    Returns all candidates — the agent/user picks the right one if there are multiple.
+    """
+    needle = recipe_name.strip().lower()
+    candidates = []
+    for ing in inventory:
+        hay = ing.name.strip().lower()
+        if hay == needle or needle in hay or hay in needle:
+            candidates.append(ing)
+    return candidates
+
+
+async def preview_cook(session: AsyncSession, plan_id: int) -> dict:
+    """Show what a cook session would change before committing anything.
+
+    Returns matched inventory deductions and unmatched recipe ingredients so the
+    agent can present a clear summary and ask the user where outputs should go
+    (fridge / freezer / back into ingredients).
+    """
+    plan = await crud.get_meal_plan_entry(session, plan_id)
+    if plan is None:
+        return {"error": f"Meal plan entry {plan_id} not found"}
+
+    plan_ings = await crud.list_meal_plan_ingredients(session, plan_id)
+    all_inventory = await crud.list_ingredients(session)
+
+    deductions = []
+    unmatched = []
+
+    for pi in plan_ings:
+        candidates = _match_inventory(pi.name, all_inventory)
+        if not candidates:
+            unmatched.append({"name": pi.name, "quantity": pi.quantity, "unit": pi.unit, "notes": pi.notes})
+            continue
+
+        # Normalise recipe qty to the same base unit for the "will_remain" calc.
+        norm_need, norm_unit = _normalise(pi.quantity, pi.unit, pi.name)
+
+        matches = []
+        for ing in candidates:
+            norm_have, _ = _normalise(ing.quantity, ing.unit, ing.name)
+            after = norm_have - norm_need if norm_unit == _ else None
+            matches.append({
+                "ingredient_id": ing.id,
+                "name": ing.name,
+                "current_quantity": ing.quantity,
+                "current_unit": ing.unit,
+                "location": ing.location,
+                "will_remain": round(after, 3) if after is not None else None,
+                "will_remain_unit": norm_unit if after is not None else None,
+                "fully_consumed": (after is not None and after <= 0),
+            })
+
+        deductions.append({
+            "recipe_ingredient": pi.name,
+            "recipe_quantity": pi.quantity,
+            "recipe_unit": pi.unit,
+            "notes": pi.notes,
+            "inventory_matches": matches,
+            # Convenience: pre-select the best (exact or single) match for the agent.
+            "suggested_ingredient_id": matches[0]["ingredient_id"] if len(matches) == 1 else None,
+        })
+
+    return {
+        "plan": _meal_plan_to_dict(plan),
+        "deductions": deductions,
+        "unmatched": unmatched,
+        "instructions": (
+            "Present this to the user. Ask: (1) Is each deduction correct? "
+            "(2) Where does the cooked output go — fridge, freezer, or split? "
+            "(3) How many portions? "
+            "(4) Is any output going back as a standalone ingredient "
+            "(e.g. a condiment, batch stock) rather than a portioned meal? "
+            "Then call confirm_cook with their answers."
+        ),
+    }
+
+
+async def confirm_cook(
+    session: AsyncSession,
+    plan_id: int,
+    deductions: list[dict],
+    outputs: list[dict],
+) -> dict:
+    """Commit a completed cook session.
+
+    deductions: [{ingredient_id, quantity, unit}] — ingredients to subtract.
+    outputs: list where each item is one of:
+      {type: "meal",       name, cuisine_tag, portions, location, notes?}
+      {type: "ingredient", name, quantity, unit, location, subcategory?, notes?}
+
+    Marks the meal plan entry as status="cooked".
+    """
+    plan = await crud.get_meal_plan_entry(session, plan_id)
+    if plan is None:
+        return {"error": f"Meal plan entry {plan_id} not found"}
+
+    # Apply ingredient deductions.
+    deducted = []
+    errors = []
+    for d in deductions:
+        ing = await crud.get_ingredient(session, d["ingredient_id"])
+        if ing is None:
+            errors.append(f"Ingredient {d['ingredient_id']} not found — skipped")
+            continue
+        norm_consume, norm_unit = _normalise(float(d["quantity"]), d["unit"], ing.name)
+        norm_have, norm_have_unit = _normalise(ing.quantity, ing.unit, ing.name)
+        if norm_unit == norm_have_unit:
+            new_norm = norm_have - norm_consume
+            # Convert back to the ingredient's original unit.
+            inv_factor = norm_have / ing.quantity if ing.quantity else 1.0
+            new_qty = new_norm / inv_factor if inv_factor else new_norm
+        else:
+            # Units don't reduce — just subtract raw quantity as given.
+            new_qty = ing.quantity - float(d["quantity"])
+        if new_qty <= 0:
+            await crud.delete_ingredient(session, ing.id)
+            deducted.append({"ingredient_id": ing.id, "name": ing.name, "status": "fully consumed"})
+        else:
+            await crud.update_ingredient(session, ing.id, {"quantity": round(new_qty, 3)})
+            deducted.append({"ingredient_id": ing.id, "name": ing.name, "remaining": round(new_qty, 3), "unit": ing.unit})
+
+    # Create outputs.
+    created_meals = []
+    created_ingredients = []
+    for out in outputs:
+        if out["type"] == "meal":
+            meal = await crud.create_meal(
+                session,
+                name=out["name"],
+                cuisine_tag=out.get("cuisine_tag", plan.cuisine_tag or "other"),
+                cooked_date=date.today(),
+                total_portions=int(out["portions"]),
+                portions_remaining=int(out["portions"]),
+                location=out["location"],
+                notes=out.get("notes"),
+            )
+            created_meals.append(_meal_to_dict(meal))
+        elif out["type"] == "ingredient":
+            ing = await crud.create_ingredient(
+                session,
+                name=out["name"],
+                quantity=float(out["quantity"]),
+                unit=out["unit"],
+                source_label="cooked",
+                location=out["location"],
+                subcategory=out.get("subcategory"),
+                arrived_date=date.today(),
+                notes=out.get("notes"),
+            )
+            created_ingredients.append(_ingredient_to_dict(ing))
+
+    # Mark the plan entry as cooked.
+    await crud.update_meal_plan(session, plan_id, {"status": "cooked"})
+
+    result: dict = {"plan_id": plan_id, "status": "cooked", "deducted": deducted}
+    if errors:
+        result["warnings"] = errors
+    if created_meals:
+        result["meals_created"] = created_meals
+    if created_ingredients:
+        result["ingredients_created"] = created_ingredients
+    return result
+
+
 # ---------------------------------------------------------------------------
 # Dispatch
 # ---------------------------------------------------------------------------
@@ -940,6 +1111,8 @@ _HANDLERS = {
     "get_recipes": get_recipes,
     "delete_recipe_from_bank": delete_recipe_from_bank,
     "mark_recipe_planned": mark_recipe_planned,
+    "preview_cook": preview_cook,
+    "confirm_cook": confirm_cook,
     "list_recurring_deliveries": list_recurring_deliveries,
     "add_recurring_delivery": add_recurring_delivery,
     "update_recurring_delivery": update_recurring_delivery,
@@ -1037,8 +1210,11 @@ TOOL_DEFINITIONS: list[dict] = [
     {
         "name": "log_meal_cooked",
         "description": (
-            "Record a batch-cooked meal. Deducts used ingredients from inventory "
-            "and creates a meal record with the given number of portions."
+            "Record a batch-cooked meal directly, without a preview step. "
+            "Use this only when you already know all ingredient IDs and quantities "
+            "(e.g. programmatic logging). "
+            "For the interactive cook-completion flow — where the user says 'I've made X' "
+            "— use preview_cook first, then confirm_cook."
         ),
         "input_schema": {
             "type": "object",
@@ -1496,6 +1672,104 @@ TOOL_DEFINITIONS: list[dict] = [
                 "label": {"type": "string", "description": "The delivery label, e.g. 'milkman'."},
             },
             "required": ["label"],
+        },
+    },
+    {
+        "name": "preview_cook",
+        "description": (
+            "Preview what completing a batch cook session would change, without committing anything. "
+            "Call this when the user says they've made / finished cooking something from the cook plan. "
+            "Matches the plan's ingredient list against current inventory and returns proposed deductions. "
+            "Present the summary to the user and ask: where does the output go (fridge/freezer/split)? "
+            "How many portions? Is any output an ingredient rather than a portioned meal (e.g. a condiment, "
+            "batch stock)? Then call confirm_cook with their answers."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "plan_id": {
+                    "type": "integer",
+                    "description": "ID of the batch_cook meal plan entry.",
+                },
+            },
+            "required": ["plan_id"],
+        },
+    },
+    {
+        "name": "confirm_cook",
+        "description": (
+            "Commit a completed cook session. Call after preview_cook once the user has confirmed "
+            "the deductions and told you where each output should go. "
+            "Marks the meal plan entry as cooked, deducts ingredients, and creates output records."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "plan_id": {
+                    "type": "integer",
+                    "description": "ID of the batch_cook meal plan entry being completed.",
+                },
+                "deductions": {
+                    "type": "array",
+                    "description": "Ingredients to subtract from inventory. Use the ingredient_ids from preview_cook.",
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "ingredient_id": {"type": "integer"},
+                            "quantity": {"type": "number"},
+                            "unit": {"type": "string"},
+                        },
+                        "required": ["ingredient_id", "quantity", "unit"],
+                    },
+                },
+                "outputs": {
+                    "type": "array",
+                    "description": (
+                        "What the cook session produced. Each item is either a portioned meal or "
+                        "an ingredient (e.g. a condiment or batch stock). "
+                        "Never assume location — always ask the user first."
+                    ),
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "type": {
+                                "type": "string",
+                                "enum": ["meal", "ingredient"],
+                                "description": "'meal' for portioned dishes; 'ingredient' for condiments, stock, etc.",
+                            },
+                            "name": {"type": "string"},
+                            "cuisine_tag": {
+                                "type": "string",
+                                "description": "Required for type='meal'. E.g. british, south-asian, italian.",
+                            },
+                            "portions": {
+                                "type": "integer",
+                                "description": "Required for type='meal'.",
+                            },
+                            "quantity": {
+                                "type": "number",
+                                "description": "Required for type='ingredient'.",
+                            },
+                            "unit": {
+                                "type": "string",
+                                "description": "Required for type='ingredient'.",
+                            },
+                            "location": {
+                                "type": "string",
+                                "enum": ["fresh", "freezer", "pantry"],
+                                "description": "Where to store the output. Always confirm with user — do not assume.",
+                            },
+                            "subcategory": {
+                                "type": "string",
+                                "description": "For type='ingredient' only.",
+                            },
+                            "notes": {"type": "string"},
+                        },
+                        "required": ["type", "name", "location"],
+                    },
+                },
+            },
+            "required": ["plan_id", "deductions", "outputs"],
         },
     },
     {

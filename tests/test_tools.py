@@ -1021,3 +1021,161 @@ async def test_confirm_recurring_delivery_adds_inventory(db_session: AsyncSessio
 async def test_confirm_recurring_delivery_not_found(db_session: AsyncSession) -> None:
     result = await tools.confirm_recurring_delivery(db_session, label="ghost")
     assert "error" in result
+
+
+# ---------------------------------------------------------------------------
+# preview_cook / confirm_cook
+# ---------------------------------------------------------------------------
+
+
+async def _make_batch_cook_plan(db_session: AsyncSession, name: str = "Chicken curry") -> int:
+    """Create a batch_cook meal plan entry with ingredients and return its id."""
+    from db.models import MealPlan, MealPlanIngredient
+    from sqlalchemy import insert
+
+    result = await db_session.execute(
+        insert(MealPlan).values(
+            name=name,
+            meal_type="batch_cook",
+            cuisine_tag="south-asian",
+            planned_date=date.today(),
+            servings=4,
+            status="planned",
+        ).returning(MealPlan.id)
+    )
+    plan_id = result.scalar_one()
+    await db_session.execute(
+        insert(MealPlanIngredient).values(
+            [
+                {"plan_id": plan_id, "name": "chicken thighs", "quantity": 800.0, "unit": "g"},
+                {"plan_id": plan_id, "name": "onion", "quantity": 2.0, "unit": "whole"},
+                {"plan_id": plan_id, "name": "garam masala", "quantity": 10.0, "unit": "g"},
+            ]
+        )
+    )
+    await db_session.commit()
+    return plan_id
+
+
+async def test_preview_cook_matches_inventory(db_session: AsyncSession) -> None:
+    await crud.create_ingredient(
+        db_session, name="chicken thighs", quantity=1000, unit="g",
+        source_label="manual", location="fresh", arrived_date=date.today(),
+    )
+    await crud.create_ingredient(
+        db_session, name="onion", quantity=5, unit="whole",
+        source_label="manual", location="fresh", arrived_date=date.today(),
+    )
+    plan_id = await _make_batch_cook_plan(db_session)
+
+    result = await tools.preview_cook(db_session, plan_id=plan_id)
+
+    assert "error" not in result
+    assert result["plan"]["id"] == plan_id
+    assert result["plan"]["status"] == "planned"
+
+    matched_names = {d["recipe_ingredient"] for d in result["deductions"]}
+    assert "chicken thighs" in matched_names
+    assert "onion" in matched_names
+
+    # garam masala not in inventory → unmatched
+    unmatched_names = {u["name"] for u in result["unmatched"]}
+    assert "garam masala" in unmatched_names
+
+    # chicken thighs: 1000g in stock, need 800g → 200g remaining
+    chicken = next(d for d in result["deductions"] if d["recipe_ingredient"] == "chicken thighs")
+    assert len(chicken["inventory_matches"]) == 1
+    match = chicken["inventory_matches"][0]
+    assert match["will_remain"] == pytest.approx(200.0)
+    assert not match["fully_consumed"]
+
+
+async def test_preview_cook_not_found(db_session: AsyncSession) -> None:
+    result = await tools.preview_cook(db_session, plan_id=9999)
+    assert "error" in result
+
+
+async def test_confirm_cook_creates_meal_and_deducts(db_session: AsyncSession) -> None:
+    ing = await crud.create_ingredient(
+        db_session, name="chicken thighs", quantity=1000, unit="g",
+        source_label="manual", location="fresh", arrived_date=date.today(),
+    )
+    plan_id = await _make_batch_cook_plan(db_session)
+
+    result = await tools.confirm_cook(
+        db_session,
+        plan_id=plan_id,
+        deductions=[{"ingredient_id": ing.id, "quantity": 800, "unit": "g"}],
+        outputs=[{"type": "meal", "name": "Chicken curry", "cuisine_tag": "south-asian", "portions": 4, "location": "freezer"}],
+    )
+
+    assert result["status"] == "cooked"
+    assert result["plan_id"] == plan_id
+    assert len(result["meals_created"]) == 1
+    assert result["meals_created"][0]["portions_remaining"] == 4
+    assert result["meals_created"][0]["location"] == "freezer"
+
+    # Ingredient should have 200g remaining (1000 - 800).
+    remaining = await crud.get_ingredient(db_session, ing.id)
+    assert remaining is not None
+    assert remaining.quantity == pytest.approx(200.0)
+
+    # Plan status updated.
+    from db import crud as c
+    plan = await c.get_meal_plan_entry(db_session, plan_id)
+    assert plan.status == "cooked"
+
+
+async def test_confirm_cook_fully_consumes_ingredient(db_session: AsyncSession) -> None:
+    ing = await crud.create_ingredient(
+        db_session, name="diced tomatoes", quantity=400, unit="g",
+        source_label="manual", location="pantry", arrived_date=date.today(),
+    )
+    plan_id = await _make_batch_cook_plan(db_session, name="Tomato sauce")
+
+    await tools.confirm_cook(
+        db_session,
+        plan_id=plan_id,
+        deductions=[{"ingredient_id": ing.id, "quantity": 400, "unit": "g"}],
+        outputs=[{"type": "meal", "name": "Tomato sauce", "cuisine_tag": "italian", "portions": 2, "location": "fresh"}],
+    )
+
+    # Ingredient fully consumed and removed.
+    gone = await crud.get_ingredient(db_session, ing.id)
+    assert gone is None
+
+
+async def test_confirm_cook_creates_ingredient_output(db_session: AsyncSession) -> None:
+    """Pickled radishes go back as an ingredient, not a portioned meal."""
+    ing = await crud.create_ingredient(
+        db_session, name="radishes", quantity=200, unit="g",
+        source_label="veg_box", location="fresh", arrived_date=date.today(),
+    )
+    plan_id = await _make_batch_cook_plan(db_session, name="Pickled radishes")
+
+    result = await tools.confirm_cook(
+        db_session,
+        plan_id=plan_id,
+        deductions=[{"ingredient_id": ing.id, "quantity": 200, "unit": "g"}],
+        outputs=[{
+            "type": "ingredient",
+            "name": "pickled radishes",
+            "quantity": 180,
+            "unit": "g",
+            "location": "fresh",
+            "subcategory": "condiment",
+            "notes": "made today",
+        }],
+    )
+
+    assert result["status"] == "cooked"
+    assert len(result.get("ingredients_created", [])) == 1
+    pickled = result["ingredients_created"][0]
+    assert pickled["name"] == "pickled radishes"
+    assert pickled["subcategory"] == "condiment"
+    assert pickled["source_label"] == "cooked"
+
+
+async def test_confirm_cook_not_found(db_session: AsyncSession) -> None:
+    result = await tools.confirm_cook(db_session, plan_id=9999, deductions=[], outputs=[])
+    assert "error" in result
