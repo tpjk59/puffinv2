@@ -665,18 +665,23 @@
       : plan.status === 'cooked'
       ? '<span class="badge ing-ok">Cooked</span>'
       : '';
-    const availBadge = isEatingOut ? '' : plan.all_in_stock
+    const missing = isEatingOut ? [] : (plan.ingredients || []).filter(i => !i.in_stock);
+    const availBadge = isEatingOut ? '' : missing.length === 0
       ? '<span class="badge ing-ok">✓ In stock</span>'
-      : '<span class="badge badge-warn">Missing items</span>';
+      : `<span class="badge badge-warn">${missing.length} missing</span>`;
     const nameHtml = plan.source_url
       ? `<a href="${plan.source_url}" target="_blank" rel="noopener">${plan.name}</a>`
       : plan.name;
     const cuisineBadge = plan.cuisine_tag && !isEatingOut
       ? `<span class="badge badge-tag">${plan.cuisine_tag}</span>` : '';
+    const missingList = missing.length
+      ? `<div style="margin-top:4px;font-size:11px;color:var(--warn)">${missing.map(i => i.name).join(', ')}</div>`
+      : '';
     return `<div class="week-slot">
       <div class="week-slot-type">${typeLabel}</div>
       <div class="week-slot-name">${nameHtml}</div>
       <div class="week-slot-badges">${cuisineBadge}${statusBadge}${availBadge}</div>
+      ${missingList}
     </div>`;
   }
 
