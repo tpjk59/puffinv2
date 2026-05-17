@@ -1,9 +1,12 @@
 """Agentic loop: LLM turn + tool dispatch, repeated until end_turn."""
 
 import json
+import logging
 
 import anthropic
 from sqlalchemy.ext.asyncio import AsyncSession
+
+_log = logging.getLogger(__name__)
 
 from agent.mcp import MF_TOOL_PREFIX, call_mf_tool, get_mf_tool_definitions, mf_configured
 from agent.prompts import SYSTEM_PROMPT, SYSTEM_PROMPT_NO_NUTRITION
@@ -93,6 +96,15 @@ async def run_agent(
                 else:
                     result = await dispatch_tool(block.name, block.input, session)
             except Exception as exc:  # noqa: BLE001
+                _log.error("Tool %s failed: %s", block.name, exc, exc_info=True)
+                # Roll back the session so it's usable for subsequent tool calls
+                # in this same turn — without this, a failed DB operation leaves
+                # the session in PendingRollbackError state and every following
+                # tool call fails with the same error.
+                try:
+                    await session.rollback()
+                except Exception:
+                    pass
                 result = {"error": str(exc)}
             tool_results.append(
                 {
