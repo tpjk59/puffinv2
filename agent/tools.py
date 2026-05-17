@@ -682,9 +682,28 @@ async def get_shopping_list(
     if week_start:
         ws = date.fromisoformat(week_start)
         we = ws + timedelta(days=6)
-        plans = await crud.list_meal_plans(session, from_date=ws, to_date=we, status="planned")
+        # Meal plan: the specified week; cook sessions: next 13 days from ws
+        meal_plans = await crud.list_meal_plans(
+            session, from_date=ws, to_date=we, status="planned", meal_type=None
+        )
+        cook_plans = await crud.list_meal_plans(
+            session, from_date=ws, to_date=ws + timedelta(days=13),
+            status="planned", meal_type="batch_cook",
+        )
+        # Deduplicate (cook sessions within the week are already in meal_plans)
+        seen_ids = {p.id for p in meal_plans}
+        plans = meal_plans + [p for p in cook_plans if p.id not in seen_ids]
     else:
-        plans = await crud.list_meal_plans(session, from_date=today, status="planned")
+        # Default: all meal types from today; batch cook looks further ahead (13 days)
+        meal_plans = await crud.list_meal_plans(
+            session, from_date=today, to_date=today + timedelta(days=6), status="planned"
+        )
+        cook_plans = await crud.list_meal_plans(
+            session, from_date=today, to_date=today + timedelta(days=13),
+            status="planned", meal_type="batch_cook",
+        )
+        seen_ids = {p.id for p in meal_plans}
+        plans = meal_plans + [p for p in cook_plans if p.id not in seen_ids]
 
     # Aggregate needed quantities in normalised units so kg/g etc. are comparable
     needed: dict[tuple, dict] = {}

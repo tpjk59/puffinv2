@@ -342,7 +342,10 @@
 
   <!-- Shopping list -->
   <div class="card">
-    <div class="card-title">Shopping list</div>
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px">
+      <div class="card-title" style="margin-bottom:0">Shopping list</div>
+      <span style="font-size:11px;color:var(--muted)">this week's meals + next 2 weeks' cook sessions</span>
+    </div>
     <div id="shopping-content"><div class="loading">Loading...</div></div>
   </div>
 
@@ -461,17 +464,12 @@
 
   function renderShoppingList(data) {
     const el = document.getElementById('shopping-content');
-    const items = data.shopping_list || [];
+    const items = (data.shopping_list || []).filter(i => i.quantity_to_buy > 0);
     if (data.message || !items.length) {
-      el.innerHTML = '<div class="empty">Nothing to buy — all planned meals are covered</div>';
+      el.innerHTML = '<div class="empty">Nothing to buy — all planned meals and cook sessions are covered</div>';
       return;
     }
-    const toBuy = items.filter(i => i.quantity_to_buy > 0);
-    if (!toBuy.length) {
-      el.innerHTML = '<div class="empty">Nothing to buy — all planned meals are covered</div>';
-      return;
-    }
-    el.innerHTML = toBuy.map(i => {
+    el.innerHTML = items.map(i => {
       const qty = i.quantity_to_buy % 1 === 0 ? i.quantity_to_buy : i.quantity_to_buy.toFixed(1);
       const meals = i.from_plans.join(', ');
       return `<div style="display:flex;justify-content:space-between;align-items:flex-start;padding:8px 0;border-bottom:1px solid var(--border)">
