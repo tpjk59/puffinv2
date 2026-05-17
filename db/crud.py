@@ -507,6 +507,7 @@ async def list_meal_plans(
     from_date: Optional[date] = None,
     to_date: Optional[date] = None,
     status: Optional[str] = None,
+    meal_type: Optional[str] = None,
 ) -> list[MealPlan]:
     query = select(MealPlan)
     if from_date is not None:
@@ -515,6 +516,8 @@ async def list_meal_plans(
         query = query.where(MealPlan.planned_date <= to_date)
     if status is not None:
         query = query.where(MealPlan.status == status)
+    if meal_type is not None:
+        query = query.where(MealPlan.meal_type == meal_type)
     result = await session.execute(query.order_by(MealPlan.planned_date))
     return list(result.scalars().all())
 

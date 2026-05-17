@@ -133,13 +133,29 @@ async def api_week_plan(week_start: Optional[str] = Query(None)):
 async def api_meal_plan(
     from_date: Optional[str] = Query(None),
     to_date: Optional[str] = Query(None),
+    meal_type: Optional[str] = Query(None),
 ):
     from datetime import date
     from agent.tools import get_meal_plan
     if from_date is None:
         from_date = date.today().isoformat()
     async with AsyncSessionLocal() as session:
-        return await get_meal_plan(session, from_date=from_date, to_date=to_date)
+        return await get_meal_plan(session, from_date=from_date, to_date=to_date, meal_type=meal_type)
+
+
+@app.get("/api/cook-plan")
+async def api_cook_plan(
+    from_date: Optional[str] = Query(None),
+    to_date: Optional[str] = Query(None),
+):
+    from datetime import date, timedelta
+    from agent.tools import get_meal_plan
+    if from_date is None:
+        from_date = date.today().isoformat()
+    if to_date is None:
+        to_date = (date.today() + timedelta(days=13)).isoformat()
+    async with AsyncSessionLocal() as session:
+        return await get_meal_plan(session, from_date=from_date, to_date=to_date, meal_type="batch_cook")
 
 
 # ---------------------------------------------------------------------------

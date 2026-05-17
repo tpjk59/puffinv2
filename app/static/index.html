@@ -75,35 +75,6 @@
       margin-bottom: 14px;
     }
 
-    /* ── Nutrition ── */
-    .nutrition-grid {
-      display: grid;
-      grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
-      gap: 14px;
-    }
-    .nutrient { }
-    .nutrient-row {
-      display: flex;
-      justify-content: space-between;
-      font-size: 13px;
-      margin-bottom: 5px;
-    }
-    .nutrient-name { font-weight: 600; }
-    .nutrient-val   { color: var(--muted); }
-    .progress-track {
-      height: 7px;
-      background: var(--border);
-      border-radius: 4px;
-      overflow: hidden;
-    }
-    .progress-fill {
-      height: 100%;
-      background: var(--accent-2);
-      border-radius: 4px;
-      transition: width 0.4s ease;
-    }
-    .progress-fill.over { background: var(--warn); }
-
     /* ── Tabs ── */
     .tabs {
       display: flex;
@@ -177,6 +148,51 @@
       color: var(--accent);
       flex-shrink: 0;
     }
+
+    /* ── Cook plan ── */
+    .cook-session {
+      padding: 10px 0;
+      border-bottom: 1px solid var(--border);
+    }
+    .cook-session:last-child { border-bottom: none; }
+    .cook-session-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-start;
+      gap: 8px;
+      margin-bottom: 4px;
+    }
+    .cook-session-name { font-weight: 500; }
+    .cook-session-date {
+      font-size: 12px;
+      color: var(--muted);
+      flex-shrink: 0;
+    }
+    .cook-session-meta {
+      display: flex;
+      gap: 5px;
+      flex-wrap: wrap;
+      align-items: center;
+    }
+    .cook-session-portions {
+      font-size: 13px;
+      color: var(--muted);
+    }
+    .cook-ingredients {
+      margin-top: 6px;
+      padding-left: 10px;
+      display: flex;
+      flex-wrap: wrap;
+      gap: 4px;
+    }
+    .ing-badge {
+      font-size: 11px;
+      padding: 2px 7px;
+      border-radius: 8px;
+      font-weight: 500;
+    }
+    .ing-ok   { background: #d1fae5; color: #065f46; }
+    .ing-miss { background: var(--warn-softer); color: #842029; }
 
     /* ── Delivery history ── */
     .delivery-item {
@@ -262,8 +278,6 @@
     .week-slot-name a:hover { text-decoration: underline; }
     .week-slot-badges { display: flex; gap: 4px; flex-wrap: wrap; margin-top: 4px; }
 
-    .ing-ok   { background: #d1fae5; color: #065f46; }
-    .ing-miss { background: var(--warn-softer); color: #842029; }
     .badge-skipped { background: var(--border); color: var(--muted); }
 
     /* ── Empty state ── */
@@ -287,14 +301,6 @@
 </header>
 
 <div class="container">
-
-  <!-- Nutrition -->
-  <div class="card">
-    <div class="card-title">Today's nutrition</div>
-    <div class="nutrition-grid" id="nutrition-content">
-      <div class="loading">Loading...</div>
-    </div>
-  </div>
 
   <!-- Inventory -->
   <div class="card">
@@ -334,6 +340,12 @@
     <div id="week-plan-content"><div class="loading">Loading...</div></div>
   </div>
 
+  <!-- Cook plan -->
+  <div class="card">
+    <div class="card-title">Cook plan</div>
+    <div id="cook-plan-content"><div class="loading">Loading...</div></div>
+  </div>
+
   <!-- Delivery history -->
   <div class="card">
     <div class="card-title">Delivery history</div>
@@ -346,19 +358,17 @@
   const TODAY = new Date();
   TODAY.setHours(0, 0, 0, 0);
 
-  // Header date
   document.getElementById('header-date').textContent =
     TODAY.toLocaleDateString('en-GB', { weekday: 'long', day: 'numeric', month: 'long' });
 
-  // Week navigation state
   let currentWeekStart = getDefaultWeekStart();
 
   function getDefaultWeekStart() {
     const d = new Date(TODAY);
-    const wd = d.getDay(); // 0=Sun, 1=Mon, …, 6=Sat
-    if (wd === 0)      d.setDate(d.getDate() + 1);  // Sun → next Mon
-    else if (wd === 6) d.setDate(d.getDate() + 2);  // Sat → next Mon
-    else               d.setDate(d.getDate() - (wd - 1)); // weekday → this Mon
+    const wd = d.getDay();
+    if (wd === 0)      d.setDate(d.getDate() + 1);
+    else if (wd === 6) d.setDate(d.getDate() + 2);
+    else               d.setDate(d.getDate() - (wd - 1));
     return d;
   }
 
@@ -378,30 +388,33 @@
     return Math.ceil((d - TODAY) / 86400000);
   }
 
+  async function safeFetch(url) {
+    const r = await fetch(url);
+    if (!r.ok) throw new Error(`${url} → ${r.status}`);
+    return r.json();
+  }
+
   async function loadAll() {
     document.getElementById('refresh-btn').textContent = '...';
-    try {
-      const [nutrition, fresh, freezer, pantry, freshMeals, frozenMeals, deliveries] = await Promise.all([
-        fetch('/api/nutrition/summary?period=today').then(r => r.json()),
-        fetch('/api/inventory?location=fresh').then(r => r.json()),
-        fetch('/api/inventory?location=freezer').then(r => r.json()),
-        fetch('/api/inventory?location=pantry').then(r => r.json()),
-        fetch('/api/meals?location=fresh').then(r => r.json()),
-        fetch('/api/meals?location=freezer').then(r => r.json()),
-        fetch('/api/delivery-schedule').then(r => r.json()),
-      ]);
-      renderNutrition(nutrition);
-      renderPanel('fresh',   fresh.ingredients   || []);
-      renderPanel('freezer', freezer.ingredients || []);
-      renderPanel('pantry',  pantry.ingredients  || []);
-      renderFreshMeals(freshMeals.meals || []);
-      renderMeals(frozenMeals.meals || []);
-      renderDeliveries(deliveries.schedules || []);
-    } catch (e) {
-      console.error(e);
-    }
+
+    const [fresh, freezer, pantry, freshMeals, frozenMeals, deliveries] = await Promise.allSettled([
+      safeFetch('/api/inventory?location=fresh'),
+      safeFetch('/api/inventory?location=freezer'),
+      safeFetch('/api/inventory?location=pantry'),
+      safeFetch('/api/meals?location=fresh'),
+      safeFetch('/api/meals?location=freezer'),
+      safeFetch('/api/delivery-schedule'),
+    ]);
+
+    renderPanel('fresh',   fresh.status   === 'fulfilled' ? (fresh.value.ingredients   || []) : []);
+    renderPanel('freezer', freezer.status === 'fulfilled' ? (freezer.value.ingredients || []) : []);
+    renderPanel('pantry',  pantry.status  === 'fulfilled' ? (pantry.value.ingredients  || []) : []);
+    renderFreshMeals(freshMeals.status  === 'fulfilled' ? (freshMeals.value.meals  || []) : []);
+    renderMeals(frozenMeals.status === 'fulfilled' ? (frozenMeals.value.meals || []) : []);
+    renderDeliveries(deliveries.status === 'fulfilled' ? (deliveries.value.schedules || []) : []);
+
     document.getElementById('refresh-btn').textContent = 'Refresh';
-    await loadWeekPlan();
+    await Promise.all([loadWeekPlan(), loadCookPlan()]);
   }
 
   async function loadWeekPlan() {
@@ -413,36 +426,21 @@
     const endFmt   = we.toLocaleDateString('en-GB', { day: 'numeric', month: 'short' });
     document.getElementById('week-label').textContent = `${startFmt} – ${endFmt}`;
     try {
-      const data = await fetch(`/api/week-plan?week_start=${ws}`).then(r => r.json());
+      const data = await safeFetch(`/api/week-plan?week_start=${ws}`);
       renderWeekPlan(data);
     } catch (e) {
-      document.getElementById('week-plan-content').innerHTML = '<div class="empty">Could not load week plan</div>';
+      document.getElementById('week-plan-content').innerHTML = '<div class="empty">Could not load meal plan</div>';
     }
   }
 
-  function renderNutrition(data) {
-    const el = document.getElementById('nutrition-content');
-    const { totals, targets } = data;
-    const nutrients = [
-      { label: 'Calories', total: totals.calories,   target: targets.calories,   unit: 'kcal' },
-      { label: 'Protein',  total: totals.protein_g,  target: targets.protein_g,  unit: 'g'    },
-      { label: 'Fibre',    total: totals.fibre_g,     target: targets.fibre_g,    unit: 'g'    },
-    ];
-    el.innerHTML = nutrients.map(n => {
-      const val = Math.round(n.total);
-      const tgt = Math.round(n.target);
-      const pct = Math.min((val / tgt) * 100, 100).toFixed(1);
-      const over = val > tgt;
-      return `<div class="nutrient">
-        <div class="nutrient-row">
-          <span class="nutrient-name">${n.label}</span>
-          <span class="nutrient-val">${val} / ${tgt}${n.unit}</span>
-        </div>
-        <div class="progress-track">
-          <div class="progress-fill ${over ? 'over' : ''}" style="width:${pct}%"></div>
-        </div>
-      </div>`;
-    }).join('');
+  async function loadCookPlan() {
+    document.getElementById('cook-plan-content').innerHTML = '<div class="loading">Loading...</div>';
+    try {
+      const data = await safeFetch('/api/cook-plan');
+      renderCookPlan(data.plans || []);
+    } catch (e) {
+      document.getElementById('cook-plan-content').innerHTML = '<div class="empty">Could not load cook plan</div>';
+    }
   }
 
   function renderPanel(loc, items) {
@@ -451,7 +449,6 @@
       el.innerHTML = '<div class="empty">Nothing here</div>';
       return;
     }
-    // Sort: expiring soonest first, then alphabetical
     items.sort((a, b) => {
       const da = a.best_before ? daysUntil(a.best_before) : 999;
       const db = b.best_before ? daysUntil(b.best_before) : 999;
@@ -464,7 +461,7 @@
     const days = daysUntil(item.best_before);
     let badge = '';
     if (days !== null) {
-      if (days <= 0)      badge = '<span class="badge badge-urgent">Expired</span>';
+      if (days <= 0)       badge = '<span class="badge badge-urgent">Expired</span>';
       else if (days === 1) badge = '<span class="badge badge-urgent">Tomorrow</span>';
       else if (days <= 3)  badge = `<span class="badge badge-warn">${days}d</span>`;
     }
@@ -519,6 +516,74 @@
         </div>
         <span class="meal-portions">${m.portions_remaining}<span style="font-weight:400;color:var(--muted)">/${m.total_portions}</span></span>
       </div>`).join('');
+  }
+
+  function renderCookPlan(plans) {
+    const el = document.getElementById('cook-plan-content');
+    if (!plans.length) {
+      el.innerHTML = '<div class="empty">No cook sessions planned — ask the agent to plan batch cooking</div>';
+      return;
+    }
+
+    // Group by date
+    const byDate = {};
+    for (const p of plans) {
+      if (!byDate[p.planned_date]) byDate[p.planned_date] = [];
+      byDate[p.planned_date].push(p);
+    }
+
+    el.innerHTML = Object.entries(byDate).sort(([a], [b]) => a.localeCompare(b)).map(([dateStr, sessions]) => {
+      const d = new Date(dateStr + 'T00:00:00');
+      const isToday = dateStr === toISODate(TODAY);
+      const dayDiff = Math.ceil((d - TODAY) / 86400000);
+      let dateLabel = d.toLocaleDateString('en-GB', { weekday: 'long', day: 'numeric', month: 'short' });
+      if (isToday) dateLabel += ' <span class="badge badge-tag">Today</span>';
+      else if (dayDiff === 1) dateLabel += ' <span class="badge badge-tag">Tomorrow</span>';
+
+      return `<div style="margin-bottom:12px">
+        <div style="font-size:12px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:0.6px;padding-bottom:6px;border-bottom:2px solid var(--border);margin-bottom:2px">${dateLabel}</div>
+        ${sessions.map(renderCookSession).join('')}
+      </div>`;
+    }).join('');
+  }
+
+  function renderCookSession(plan) {
+    const ings = plan.ingredients || [];
+    const allOk = plan.all_in_stock;
+    const missingCount = ings.filter(i => !i.in_stock).length;
+
+    const stockBadge = ings.length === 0 ? '' :
+      allOk
+        ? '<span class="badge ing-ok">✓ All in stock</span>'
+        : `<span class="badge badge-warn">${missingCount} missing</span>`;
+
+    const nameHtml = plan.source_url
+      ? `<a href="${plan.source_url}" target="_blank" rel="noopener">${plan.name}</a>`
+      : plan.name;
+
+    const cuisineBadge = plan.cuisine_tag
+      ? `<span class="badge badge-tag">${plan.cuisine_tag}</span>` : '';
+
+    const statusBadge = plan.status && plan.status !== 'planned'
+      ? `<span class="badge ${plan.status === 'cooked' ? 'ing-ok' : 'badge-skipped'}">${plan.status}</span>` : '';
+
+    const ingList = ings.length
+      ? `<div class="cook-ingredients">${ings.map(i =>
+          `<span class="ing-badge ${i.in_stock ? 'ing-ok' : 'ing-miss'}">${i.name}</span>`
+        ).join('')}</div>`
+      : '';
+
+    return `<div class="cook-session">
+      <div class="cook-session-header">
+        <span class="cook-session-name">${nameHtml}</span>
+        <span class="cook-session-date">${plan.servings} portions</span>
+      </div>
+      <div class="cook-session-meta">
+        ${cuisineBadge}${statusBadge}${stockBadge}
+        ${plan.notes ? `<span class="badge badge-tag" title="${plan.notes}">note</span>` : ''}
+      </div>
+      ${ingList}
+    </div>`;
   }
 
   function renderWeekPlan(data) {

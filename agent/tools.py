@@ -452,12 +452,14 @@ async def get_meal_plan(
     from_date: Optional[str] = None,
     to_date: Optional[str] = None,
     status: Optional[str] = None,
+    meal_type: Optional[str] = None,
 ) -> dict:
     plans = await crud.list_meal_plans(
         session,
         from_date=date.fromisoformat(from_date) if from_date else None,
         to_date=date.fromisoformat(to_date) if to_date else None,
         status=status,
+        meal_type=meal_type,
     )
     all_inventory = await crud.list_ingredients(session)
     stock: dict[tuple, float] = {}
@@ -558,7 +560,8 @@ async def get_week_plan(
         ws = today - timedelta(days=today.weekday())
     we = ws + timedelta(days=6)
 
-    plans = await crud.list_meal_plans(session, from_date=ws, to_date=we)
+    all_plans = await crud.list_meal_plans(session, from_date=ws, to_date=we)
+    plans = [p for p in all_plans if p.meal_type != "batch_cook"]
 
     all_inventory = await crud.list_ingredients(session)
     stock: dict[tuple, float] = {}
@@ -576,7 +579,9 @@ async def get_week_plan(
         day_plans = [p for p in plans if p.planned_date == day]
         slots: dict[str, dict] = {}
         for plan in day_plans:
-            mt = plan.meal_type or "dinner"
+            mt = plan.meal_type or "unplanned"
+            if mt not in ("lunch", "dinner", "brunch"):
+                continue
             ings = await crud.list_meal_plan_ingredients(session, plan.id)
             ing_list = []
             for pi in ings:
@@ -1169,10 +1174,12 @@ TOOL_DEFINITIONS: list[dict] = [
                 "planned_date": {"type": "string", "description": "ISO date YYYY-MM-DD."},
                 "meal_type": {
                     "type": "string",
-                    "enum": ["lunch", "brunch", "dinner"],
+                    "enum": ["lunch", "brunch", "dinner", "batch_cook"],
                     "description": (
-                        "Slot in the day. Use 'brunch' for weekend/holiday midday meals "
-                        "that replace both breakfast and lunch. Defaults to 'dinner'."
+                        "Use 'batch_cook' for planned cooking/prep sessions (batch cooking, "
+                        "baking, making ahead to freeze). Use 'lunch', 'dinner', or 'brunch' "
+                        "for meals planned to eat. batch_cook entries appear in the Cook Plan, "
+                        "not the Meal Plan eating grid."
                     ),
                 },
                 "ingredients": {
@@ -1228,7 +1235,7 @@ TOOL_DEFINITIONS: list[dict] = [
             "properties": {
                 "plan_id": {"type": "integer"},
                 "name": {"type": "string"},
-                "meal_type": {"type": "string", "enum": ["lunch", "brunch", "dinner"]},
+                "meal_type": {"type": "string", "enum": ["lunch", "brunch", "dinner", "batch_cook"]},
                 "planned_date": {"type": "string", "description": "ISO date YYYY-MM-DD."},
                 "servings": {"type": "integer"},
                 "cuisine_tag": {"type": "string"},
