@@ -25,9 +25,8 @@ _STATIC = Path(__file__).parent / "static"
 class _BasicAuthMiddleware(BaseHTTPMiddleware):
     """Require HTTP Basic Auth for all routes except /health and /webhook/*."""
 
-    def __init__(self, app: ASGIApp, username: str, password: str) -> None:
+    def __init__(self, app: ASGIApp, password: str) -> None:
         super().__init__(app)
-        self._username = username
         self._password = password
 
     async def dispatch(self, request: Request, call_next):
@@ -38,10 +37,8 @@ class _BasicAuthMiddleware(BaseHTTPMiddleware):
         if auth.startswith("Basic "):
             try:
                 decoded = base64.b64decode(auth[6:]).decode()
-                uname, _, pwd = decoded.partition(":")
-                if secrets.compare_digest(uname, self._username) and secrets.compare_digest(
-                    pwd, self._password
-                ):
+                _, _, pwd = decoded.partition(":")
+                if secrets.compare_digest(pwd, self._password):
                     return await call_next(request)
             except Exception:
                 pass
@@ -66,11 +63,7 @@ app = FastAPI(title="Meal Planner", lifespan=lifespan)
 
 _web_pass = os.getenv("WEB_PASSWORD", "")
 if _web_pass:
-    app.add_middleware(
-        _BasicAuthMiddleware,
-        username=os.getenv("WEB_USERNAME", "puffin"),
-        password=_web_pass,
-    )
+    app.add_middleware(_BasicAuthMiddleware, password=_web_pass)
 
 app.mount("/static", StaticFiles(directory=_STATIC), name="static")
 

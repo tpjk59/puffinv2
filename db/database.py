@@ -3,6 +3,7 @@
 import os
 
 from dotenv import load_dotenv
+from sqlalchemy import event
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
 from db.models import Base
@@ -14,6 +15,13 @@ DATABASE_URL: str = os.getenv(
 )
 
 engine = create_async_engine(DATABASE_URL, echo=False)
+
+
+@event.listens_for(engine.sync_engine, "connect")
+def _set_wal_mode(dbapi_connection, connection_record):
+    cursor = dbapi_connection.cursor()
+    cursor.execute("PRAGMA journal_mode=WAL")
+    cursor.close()
 
 AsyncSessionLocal = async_sessionmaker(
     engine, class_=AsyncSession, expire_on_commit=False
