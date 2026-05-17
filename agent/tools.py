@@ -28,6 +28,8 @@ _UNIT_TO_BASE: dict[str, tuple[str, float]] = {
     "l": ("ml", 1000.0),
     "pint": ("ml", 568.0),   # UK pint
     "pints": ("ml", 568.0),
+    "sticks": ("stalk", 1.0),  # celery sticks = stalks
+    "stick": ("stalk", 1.0),
 }
 
 # Ingredient-specific conversions where the units are otherwise incompatible.
@@ -38,12 +40,12 @@ _INGREDIENT_UNIT_TO_BASE: dict[tuple[str, str], tuple[str, float]] = {
 
 # If an ingredient is stocked in one of these "container" units but a recipe
 # measures it in a specific amount, treat it as available (container = "I have some").
-_CONTAINER_UNITS = frozenset({"whole", "jar", "bottle", "bag", "box", "packet"})
+_CONTAINER_UNITS = frozenset({"whole", "jar", "bottle", "bag", "box", "packet", "pot", "tin", "pack"})
 
 # Ingredients in these subcategories are tracked by presence only — any stock means
 # available, regardless of quantity. They appear on the shopping list only when fully
 # out of stock (deleted from inventory).
-_STAPLE_SUBCATEGORIES = frozenset({"herb_spice", "condiment"})
+_STAPLE_SUBCATEGORIES = frozenset({"herb_spice", "condiment", "baking"})
 
 
 def _check_stock(
