@@ -36,8 +36,11 @@ async def _run_and_send(prompt: str, bot_token: str, chat_id: str) -> None:
 
 async def _packed_lunch_nudge(bot_token: str, chat_id: str) -> None:
     await _run_and_send(
-        "It's a weekday morning. Suggest what to pack for lunch today — "
-        "check the inventory and preferences first, prioritise anything close to expiry.",
+        "It's a weekday morning. Check preferences (especially weekday_workplace and "
+        "lunch_reheat), then suggest something specific to pack for lunch today. "
+        "The suggestion must be portable and ready to go — no cooking at lunchtime. "
+        "Pick from fridge leftovers, defrosted freezer portions, or anything close to "
+        "expiry that travels well. One clear recommendation, not a list.",
         bot_token,
         chat_id,
     )

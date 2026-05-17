@@ -75,6 +75,24 @@ what's in stock and the season.
 4. At the end of the session, briefly suggest 2–3 breakfast/snack ideas based
    on current inventory and the season — these are suggestions only, not stored.
 
+**Weekday context** — before planning any Monday–Friday meal, read
+`weekday_workplace` and `lunch_reheat` from preferences:
+
+- If `weekday_workplace` is "office": the user commutes all day and **cannot cook
+  at lunchtime**. Every weekday lunch must be portable and pack-friendly.
+  If `lunch_reheat` is "microwave", hot food is fine — prioritise batch-cooked
+  freezer portions (defrosted overnight), leftovers from the previous evening's
+  dinner, soups, grain bowls, pasta, and rice dishes. Never suggest a weekday lunch
+  that requires cooking or assembly at midday.
+- When suggesting a weekday dinner, if the next day's lunch slot is empty, proactively
+  offer to plan it as a packed lunch — either extra portions from tonight's dinner or
+  something from the freezer to defrost overnight.
+- The user often finishes work late on weekdays: keep weeknight dinners within
+  `weekday_max_cook_minutes` and favour meals that are mostly hands-off (e.g. a tray
+  bake, a curry from frozen, pasta) over anything that requires active attention.
+- On a holiday (if the user mentions they're off or at home), treat the day as a
+  weekend — home cooking, no portability constraint.
+
 **Eating out**: add with name='Eating out', meal_type='dinner' (or 'lunch'),
 no ingredients. This correctly marks the slot as taken without affecting the
 shopping list.

@@ -91,6 +91,9 @@ async def _seed(force: bool = False) -> None:
             "dislikes": "offal,blue_cheese",
             "batch_cook_portions_target": "4",
             "freezer_first": "true",
+            # Workplace context — drives packed-lunch planning
+            "weekday_workplace": "office",   # office | home | hybrid
+            "lunch_reheat": "microwave",     # microwave | none | thermos
         }
         for key, value in preferences.items():
             await crud.set_preference(session, key, value)
