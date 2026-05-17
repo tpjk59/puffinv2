@@ -1,7 +1,9 @@
 """FastAPI application — webhook, REST API, and web dashboard."""
 
+import base64
 import logging
 import os
+import secrets
 from contextlib import asynccontextmanager
 
 logging.basicConfig(level=logging.INFO)
@@ -11,10 +13,42 @@ from typing import Optional
 from fastapi import FastAPI, Query, Request, Response
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
+from starlette.middleware.base import BaseHTTPMiddleware
+from starlette.responses import Response as StarletteResponse
+from starlette.types import ASGIApp
 
 from db.database import AsyncSessionLocal, create_all_tables
 
 _STATIC = Path(__file__).parent / "static"
+
+
+class _BasicAuthMiddleware(BaseHTTPMiddleware):
+    """Require HTTP Basic Auth for all routes except /health and /webhook/*."""
+
+    def __init__(self, app: ASGIApp, username: str, password: str) -> None:
+        super().__init__(app)
+        self._username = username
+        self._password = password
+
+    async def dispatch(self, request: Request, call_next):
+        path = request.url.path
+        if path == "/health" or path.startswith("/webhook/"):
+            return await call_next(request)
+        auth = request.headers.get("Authorization", "")
+        if auth.startswith("Basic "):
+            try:
+                decoded = base64.b64decode(auth[6:]).decode()
+                uname, _, pwd = decoded.partition(":")
+                if secrets.compare_digest(uname, self._username) and secrets.compare_digest(
+                    pwd, self._password
+                ):
+                    return await call_next(request)
+            except Exception:
+                pass
+        return StarletteResponse(
+            status_code=401,
+            headers={"WWW-Authenticate": 'Basic realm="Puffin"'},
+        )
 
 
 @asynccontextmanager
@@ -29,6 +63,15 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(title="Meal Planner", lifespan=lifespan)
+
+_web_pass = os.getenv("WEB_PASSWORD", "")
+if _web_pass:
+    app.add_middleware(
+        _BasicAuthMiddleware,
+        username=os.getenv("WEB_USERNAME", "puffin"),
+        password=_web_pass,
+    )
+
 app.mount("/static", StaticFiles(directory=_STATIC), name="static")
 
 
@@ -112,6 +155,12 @@ async def api_meal_plan(
 
 @app.post("/webhook/telegram")
 async def telegram_webhook(request: Request) -> Response:
+    webhook_secret = os.getenv("TELEGRAM_WEBHOOK_SECRET", "")
+    if webhook_secret:
+        provided = request.headers.get("X-Telegram-Bot-Api-Secret-Token", "")
+        if not secrets.compare_digest(provided, webhook_secret):
+            return Response(status_code=403)
+
     update = await request.json()
     # Respond immediately so Telegram doesn't retry on slow agent responses
     import asyncio

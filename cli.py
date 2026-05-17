@@ -1,11 +1,47 @@
 """Typer CLI for meal planner admin tasks."""
 
 import asyncio
+import os
 from datetime import date, timedelta
 
 import typer
 
 app = typer.Typer(help="Meal Planner admin CLI")
+
+
+@app.command(name="register-webhook")
+def register_webhook(
+    url: str = typer.Argument(help="Full webhook URL, e.g. https://puffin-meal-planner.fly.dev/webhook/telegram"),
+) -> None:
+    """Register (or re-register) the Telegram webhook, including the secret token if set."""
+    import httpx
+
+    bot_token = os.getenv("TELEGRAM_BOT_TOKEN", "")
+    if not bot_token:
+        typer.echo("Error: TELEGRAM_BOT_TOKEN not set", err=True)
+        raise typer.Exit(1)
+
+    secret = os.getenv("TELEGRAM_WEBHOOK_SECRET", "")
+    payload: dict = {"url": url}
+    if secret:
+        payload["secret_token"] = secret
+
+    async def _register() -> dict:
+        async with httpx.AsyncClient(timeout=15.0) as client:
+            r = await client.post(
+                f"https://api.telegram.org/bot{bot_token}/setWebhook",
+                json=payload,
+            )
+            return r.json()
+
+    result = asyncio.run(_register())
+    if result.get("ok"):
+        typer.echo("Webhook registered.")
+        if secret:
+            typer.echo("Secret token set — requests without the correct header will be rejected.")
+    else:
+        typer.echo(f"Failed: {result}", err=True)
+        raise typer.Exit(1)
 
 
 @app.command()
