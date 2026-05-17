@@ -16,6 +16,7 @@ from db.models import (
     NutritionLog,
     Preference,
     Recipe,
+    RecurringDelivery,
 )
 
 
@@ -376,6 +377,64 @@ async def delete_recipe(session: AsyncSession, recipe_id: int) -> bool:
     await session.delete(recipe)
     await session.commit()
     return True
+
+
+# ---------------------------------------------------------------------------
+# RecurringDelivery
+# ---------------------------------------------------------------------------
+
+
+async def create_recurring_delivery(
+    session: AsyncSession,
+    label: str,
+    description: str,
+    items_json: str,
+    days: str,
+    send_time: str = "07:00",
+) -> RecurringDelivery:
+    rd = RecurringDelivery(
+        label=label,
+        description=description,
+        items_json=items_json,
+        days=days,
+        send_time=send_time,
+    )
+    session.add(rd)
+    await session.commit()
+    await session.refresh(rd)
+    return rd
+
+
+async def get_recurring_delivery(
+    session: AsyncSession, label: str
+) -> Optional[RecurringDelivery]:
+    result = await session.execute(
+        select(RecurringDelivery).where(RecurringDelivery.label == label)
+    )
+    return result.scalar_one_or_none()
+
+
+async def list_recurring_deliveries(
+    session: AsyncSession, active_only: bool = False
+) -> list[RecurringDelivery]:
+    query = select(RecurringDelivery)
+    if active_only:
+        query = query.where(RecurringDelivery.active == True)  # noqa: E712
+    result = await session.execute(query.order_by(RecurringDelivery.label))
+    return list(result.scalars().all())
+
+
+async def update_recurring_delivery(
+    session: AsyncSession, label: str, updates: dict[str, Any]
+) -> Optional[RecurringDelivery]:
+    rd = await get_recurring_delivery(session, label)
+    if rd is None:
+        return None
+    for key, value in updates.items():
+        setattr(rd, key, value)
+    await session.commit()
+    await session.refresh(rd)
+    return rd
 
 
 async def create_delivery_schedule(

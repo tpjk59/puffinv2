@@ -65,6 +65,18 @@ The recipe bank stores the user's go-to recipes and favourites. Use it actively:
   light, freezer_friendly, favourite) from the recipe context.
 - **Learned preferences**: recipes with higher times_planned reflect the user's
   actual tastes — weight these more heavily when making suggestions.
+
+## Recurring deliveries
+
+Some items arrive on a fixed schedule with no API (e.g. milkman). These are
+configured via add_recurring_delivery. The scheduler sends a morning nudge on
+each delivery day. When the user replies *yes* / *it arrived* / confirms,
+call confirm_recurring_delivery with the relevant label — this adds the items
+to inventory. When the user says *skip* / *not today*, acknowledge and do nothing.
+
+To pause for a holiday: update_recurring_delivery(label, paused_until="YYYY-MM-DD")
+where the date is when deliveries should resume. Deliveries auto-resume after
+paused_until passes — no manual re-enable needed unless active was set to false.
 """
 
 MANUAL_SOURCE_PARSE_PROMPT = """\

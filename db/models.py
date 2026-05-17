@@ -3,7 +3,7 @@
 from datetime import UTC, date, datetime
 from typing import Optional
 
-from sqlalchemy import Date, DateTime, Float, ForeignKey, Integer, String, Text
+from sqlalchemy import Boolean, Date, DateTime, Float, ForeignKey, Integer, String, Text
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 
 
@@ -140,6 +140,21 @@ class Recipe(Base):
     times_planned: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     last_planned: Mapped[Optional[date]] = mapped_column(Date, nullable=True)
     created_at: Mapped[date] = mapped_column(Date, nullable=False)
+
+
+class RecurringDelivery(Base):
+    __tablename__ = "recurring_deliveries"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    label: Mapped[str] = mapped_column(String(100), nullable=False, unique=True)
+    description: Mapped[str] = mapped_column(String(255), nullable=False)
+    # JSON array: [{name, quantity, unit, location, subcategory}, ...]
+    items_json: Mapped[str] = mapped_column(Text, nullable=False)
+    # Comma-separated day names: "monday,thursday"
+    days: Mapped[str] = mapped_column(String(100), nullable=False)
+    send_time: Mapped[str] = mapped_column(String(5), nullable=False, default="07:00")
+    active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    paused_until: Mapped[Optional[date]] = mapped_column(Date, nullable=True)
 
 
 class DeliverySchedule(Base):

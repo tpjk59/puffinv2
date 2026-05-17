@@ -24,6 +24,14 @@ _seen_update_ids: set[int] = set()
 _MAX_SEEN_IDS = 500
 
 
+def inject_assistant_message(chat_id: int, text: str) -> None:
+    """Store a scheduler-sent message in history so the agent has context for the user's reply."""
+    history = _history.setdefault(chat_id, [])
+    history.append({"role": "assistant", "content": text})
+    if len(history) > _MAX_HISTORY_MESSAGES:
+        _history[chat_id] = history[-_MAX_HISTORY_MESSAGES:]
+
+
 async def _download_file_b64(bot_token: str, file_id: str) -> tuple[str, str]:
     """Download a Telegram file by file_id and return (base64_data, media_type)."""
     async with httpx.AsyncClient(timeout=30.0) as client:

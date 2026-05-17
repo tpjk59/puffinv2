@@ -824,6 +824,102 @@ async def delete_recipe_from_bank(session: AsyncSession, recipe_id: int) -> dict
     return {"status": "deleted", "recipe_id": recipe_id}
 
 
+def _recurring_delivery_to_dict(rd) -> dict:
+    return {
+        "id": rd.id,
+        "label": rd.label,
+        "description": rd.description,
+        "items": json.loads(rd.items_json),
+        "days": rd.days,
+        "send_time": rd.send_time,
+        "active": rd.active,
+        "paused_until": rd.paused_until.isoformat() if rd.paused_until else None,
+    }
+
+
+async def list_recurring_deliveries(session: AsyncSession) -> dict:
+    deliveries = await crud.list_recurring_deliveries(session)
+    return {
+        "deliveries": [_recurring_delivery_to_dict(d) for d in deliveries],
+        "count": len(deliveries),
+    }
+
+
+async def add_recurring_delivery(
+    session: AsyncSession,
+    label: str,
+    description: str,
+    items: list[dict],
+    days: str,
+    send_time: str = "07:00",
+) -> dict:
+    """Create a recurring delivery. items is a list of {name, quantity, unit, location, subcategory}."""
+    existing = await crud.get_recurring_delivery(session, label)
+    if existing is not None:
+        return {"error": f"Recurring delivery '{label}' already exists. Use update_recurring_delivery to modify it."}
+    rd = await crud.create_recurring_delivery(
+        session,
+        label=label,
+        description=description,
+        items_json=json.dumps(items),
+        days=days,
+        send_time=send_time,
+    )
+    return {"delivery": _recurring_delivery_to_dict(rd), "status": "created"}
+
+
+async def update_recurring_delivery(
+    session: AsyncSession,
+    label: str,
+    description: Optional[str] = None,
+    items: Optional[list[dict]] = None,
+    days: Optional[str] = None,
+    send_time: Optional[str] = None,
+    active: Optional[bool] = None,
+    paused_until: Optional[str] = None,
+) -> dict:
+    updates: dict[str, Any] = {}
+    if description is not None:
+        updates["description"] = description
+    if items is not None:
+        updates["items_json"] = json.dumps(items)
+    if days is not None:
+        updates["days"] = days
+    if send_time is not None:
+        updates["send_time"] = send_time
+    if active is not None:
+        updates["active"] = active
+    if paused_until is not None:
+        updates["paused_until"] = date.fromisoformat(paused_until) if paused_until else None
+    rd = await crud.update_recurring_delivery(session, label, updates)
+    if rd is None:
+        return {"error": f"Recurring delivery '{label}' not found"}
+    return {"delivery": _recurring_delivery_to_dict(rd), "status": "updated"}
+
+
+async def confirm_recurring_delivery(session: AsyncSession, label: str) -> dict:
+    """Add the delivery's items to inventory. Call when the user confirms a delivery arrived."""
+    rd = await crud.get_recurring_delivery(session, label)
+    if rd is None:
+        return {"error": f"Recurring delivery '{label}' not found"}
+    items = json.loads(rd.items_json)
+    today = date.today()
+    added = []
+    for item in items:
+        ing = await crud.create_ingredient(
+            session,
+            name=item["name"],
+            quantity=float(item["quantity"]),
+            unit=item["unit"],
+            source_label=f"recurring_{label}",
+            location=item.get("location", "fresh"),
+            subcategory=item.get("subcategory"),
+            arrived_date=today,
+        )
+        added.append({"name": ing.name, "quantity": ing.quantity, "unit": ing.unit})
+    return {"added": added, "count": len(added), "label": label}
+
+
 async def mark_recipe_planned(
     session: AsyncSession,
     recipe_id: int,
@@ -868,6 +964,10 @@ _HANDLERS = {
     "get_recipes": get_recipes,
     "delete_recipe_from_bank": delete_recipe_from_bank,
     "mark_recipe_planned": mark_recipe_planned,
+    "list_recurring_deliveries": list_recurring_deliveries,
+    "add_recurring_delivery": add_recurring_delivery,
+    "update_recurring_delivery": update_recurring_delivery,
+    "confirm_recurring_delivery": confirm_recurring_delivery,
 }
 
 
@@ -1378,6 +1478,84 @@ TOOL_DEFINITIONS: list[dict] = [
                 "recipe_id": {"type": "integer"},
             },
             "required": ["recipe_id"],
+        },
+    },
+    {
+        "name": "list_recurring_deliveries",
+        "description": "List all configured recurring deliveries (e.g. milkman) with their schedules and pause status.",
+        "input_schema": {"type": "object", "properties": {}},
+    },
+    {
+        "name": "add_recurring_delivery",
+        "description": (
+            "Configure a new recurring delivery — e.g. a milkman, a weekly bread order. "
+            "The scheduler will send a Telegram nudge on each delivery day asking for confirmation. "
+            "days format: comma-separated lowercase day names, e.g. 'monday,thursday'."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "label": {"type": "string", "description": "Short unique identifier, e.g. 'milkman'."},
+                "description": {"type": "string", "description": "Human-readable label, e.g. 'Milkman — 2 pints whole milk'."},
+                "items": {
+                    "type": "array",
+                    "description": "Fixed items added on each delivery.",
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "name": {"type": "string"},
+                            "quantity": {"type": "number"},
+                            "unit": {"type": "string"},
+                            "location": {"type": "string", "enum": ["fresh", "freezer", "pantry"]},
+                            "subcategory": {"type": "string"},
+                        },
+                        "required": ["name", "quantity", "unit", "location"],
+                    },
+                },
+                "days": {"type": "string", "description": "Comma-separated delivery days, e.g. 'monday,thursday'."},
+                "send_time": {"type": "string", "description": "HH:MM nudge time. Defaults to '07:00'."},
+            },
+            "required": ["label", "description", "items", "days"],
+        },
+    },
+    {
+        "name": "update_recurring_delivery",
+        "description": (
+            "Update a recurring delivery config. "
+            "To pause for a holiday, set paused_until to the return date (ISO date). "
+            "To permanently disable, set active=false. "
+            "To re-enable after a pause, set active=true and paused_until=null."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "label": {"type": "string"},
+                "description": {"type": "string"},
+                "items": {"type": "array", "items": {"type": "object"}},
+                "days": {"type": "string"},
+                "send_time": {"type": "string"},
+                "active": {"type": "boolean"},
+                "paused_until": {
+                    "type": "string",
+                    "description": "ISO date YYYY-MM-DD to pause until (inclusive). Pass null to clear.",
+                },
+            },
+            "required": ["label"],
+        },
+    },
+    {
+        "name": "confirm_recurring_delivery",
+        "description": (
+            "Add a recurring delivery's items to inventory. "
+            "Call this when the user confirms a delivery arrived "
+            "(e.g. replies 'yes' to the morning nudge)."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "label": {"type": "string", "description": "The delivery label, e.g. 'milkman'."},
+            },
+            "required": ["label"],
         },
     },
     {

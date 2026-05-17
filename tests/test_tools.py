@@ -1013,3 +1013,89 @@ async def test_delete_recipe_from_bank(db_session: AsyncSession) -> None:
 async def test_delete_recipe_from_bank_not_found(db_session: AsyncSession) -> None:
     result = await tools.delete_recipe_from_bank(db_session, recipe_id=9999)
     assert "error" in result
+
+
+# ---------------------------------------------------------------------------
+# Recurring deliveries
+# ---------------------------------------------------------------------------
+
+_MILK_ITEMS = [{"name": "whole milk", "quantity": 2, "unit": "pint", "location": "fresh", "subcategory": "dairy"}]
+
+
+async def test_add_recurring_delivery(db_session: AsyncSession) -> None:
+    result = await tools.add_recurring_delivery(
+        db_session,
+        label="milkman",
+        description="Milkman — 2 pints whole milk",
+        items=_MILK_ITEMS,
+        days="monday,thursday",
+    )
+    assert result["status"] == "created"
+    d = result["delivery"]
+    assert d["label"] == "milkman"
+    assert d["days"] == "monday,thursday"
+    assert d["active"] is True
+    assert d["paused_until"] is None
+    assert len(d["items"]) == 1
+
+
+async def test_add_recurring_delivery_duplicate_label(db_session: AsyncSession) -> None:
+    await tools.add_recurring_delivery(
+        db_session, label="milkman", description="Milkman", items=_MILK_ITEMS, days="monday"
+    )
+    result = await tools.add_recurring_delivery(
+        db_session, label="milkman", description="Milkman", items=_MILK_ITEMS, days="monday"
+    )
+    assert "error" in result
+
+
+async def test_list_recurring_deliveries(db_session: AsyncSession) -> None:
+    await tools.add_recurring_delivery(
+        db_session, label="milkman", description="Milkman", items=_MILK_ITEMS, days="monday,thursday"
+    )
+    result = await tools.list_recurring_deliveries(db_session)
+    assert result["count"] == 1
+    assert result["deliveries"][0]["label"] == "milkman"
+
+
+async def test_update_recurring_delivery_pause(db_session: AsyncSession) -> None:
+    await tools.add_recurring_delivery(
+        db_session, label="milkman", description="Milkman", items=_MILK_ITEMS, days="monday,thursday"
+    )
+    result = await tools.update_recurring_delivery(
+        db_session, label="milkman", paused_until="2026-06-07"
+    )
+    assert result["delivery"]["paused_until"] == "2026-06-07"
+
+
+async def test_update_recurring_delivery_disable(db_session: AsyncSession) -> None:
+    await tools.add_recurring_delivery(
+        db_session, label="milkman", description="Milkman", items=_MILK_ITEMS, days="monday,thursday"
+    )
+    result = await tools.update_recurring_delivery(db_session, label="milkman", active=False)
+    assert result["delivery"]["active"] is False
+
+
+async def test_update_recurring_delivery_not_found(db_session: AsyncSession) -> None:
+    result = await tools.update_recurring_delivery(db_session, label="ghost", active=False)
+    assert "error" in result
+
+
+async def test_confirm_recurring_delivery_adds_inventory(db_session: AsyncSession) -> None:
+    await tools.add_recurring_delivery(
+        db_session, label="milkman", description="Milkman", items=_MILK_ITEMS, days="monday,thursday"
+    )
+    result = await tools.confirm_recurring_delivery(db_session, label="milkman")
+    assert result["count"] == 1
+    assert result["added"][0]["name"] == "whole milk"
+    assert result["added"][0]["quantity"] == 2.0
+
+    inventory = await tools.get_inventory(db_session)
+    milk = next((i for i in inventory["ingredients"] if i["name"] == "whole milk"), None)
+    assert milk is not None
+    assert milk["source_label"] == "recurring_milkman"
+
+
+async def test_confirm_recurring_delivery_not_found(db_session: AsyncSession) -> None:
+    result = await tools.confirm_recurring_delivery(db_session, label="ghost")
+    assert "error" in result
