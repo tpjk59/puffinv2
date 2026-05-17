@@ -654,7 +654,35 @@
         </div>`;
       }).join('') +
       '</div>' +
-      (!hasAny ? '<div class="empty" style="margin-top:12px">No meals planned — ask the agent to plan the week</div>' : '');
+      (!hasAny ? '<div class="empty" style="margin-top:12px">No meals planned — ask the agent to plan the week</div>' : '') +
+      renderWeekMissing(days);
+  }
+
+  function renderWeekMissing(days) {
+    // Collect unique missing ingredients across all slots in the week
+    const seen = new Set();
+    const missing = [];
+    for (const day of days) {
+      for (const plan of Object.values(day.slots)) {
+        if (!plan || plan.name === 'Eating out') continue;
+        for (const ing of (plan.ingredients || [])) {
+          if (!ing.in_stock && !seen.has(ing.name.toLowerCase())) {
+            seen.add(ing.name.toLowerCase());
+            missing.push(ing.name);
+          }
+        }
+      }
+    }
+    if (!missing.length) return '';
+    return `<div style="margin-top:14px;background:var(--bg);border-radius:8px;padding:10px 12px">
+      <div style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:0.8px;color:var(--muted);margin-bottom:8px;display:flex;justify-content:space-between;align-items:center">
+        <span>To buy this week</span>
+        <span class="badge badge-warn">${missing.length} item${missing.length !== 1 ? 's' : ''}</span>
+      </div>
+      <div style="display:flex;flex-wrap:wrap;gap:5px">
+        ${missing.map(n => `<span class="ing-badge ing-miss">${n}</span>`).join('')}
+      </div>
+    </div>`;
   }
 
   function renderSlot(plan, typeLabel) {
@@ -665,23 +693,18 @@
       : plan.status === 'cooked'
       ? '<span class="badge ing-ok">Cooked</span>'
       : '';
-    const missing = isEatingOut ? [] : (plan.ingredients || []).filter(i => !i.in_stock);
-    const availBadge = isEatingOut ? '' : missing.length === 0
+    const availBadge = isEatingOut ? '' : plan.all_in_stock
       ? '<span class="badge ing-ok">✓ In stock</span>'
-      : `<span class="badge badge-warn">${missing.length} missing</span>`;
+      : '<span class="badge badge-warn">Missing items</span>';
     const nameHtml = plan.source_url
       ? `<a href="${plan.source_url}" target="_blank" rel="noopener">${plan.name}</a>`
       : plan.name;
     const cuisineBadge = plan.cuisine_tag && !isEatingOut
       ? `<span class="badge badge-tag">${plan.cuisine_tag}</span>` : '';
-    const missingList = missing.length
-      ? `<div style="margin-top:4px;font-size:11px;color:var(--warn)">${missing.map(i => i.name).join(', ')}</div>`
-      : '';
     return `<div class="week-slot">
       <div class="week-slot-type">${typeLabel}</div>
       <div class="week-slot-name">${nameHtml}</div>
       <div class="week-slot-badges">${cuisineBadge}${statusBadge}${availBadge}</div>
-      ${missingList}
     </div>`;
   }
 
