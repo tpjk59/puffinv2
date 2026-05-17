@@ -30,6 +30,9 @@ _UNIT_TO_BASE: dict[str, tuple[str, float]] = {
     "pints": ("ml", 568.0),
     "sticks": ("stalk", 1.0),  # celery sticks = stalks
     "stick": ("stalk", 1.0),
+    "portions": ("portion", 1.0),
+    "serving": ("portion", 1.0),
+    "servings": ("portion", 1.0),
 }
 
 # Ingredient-specific conversions where the units are otherwise incompatible.
@@ -40,7 +43,17 @@ _INGREDIENT_UNIT_TO_BASE: dict[tuple[str, str], tuple[str, float]] = {
 
 # If an ingredient is stocked in one of these "container" units but a recipe
 # measures it in a specific amount, treat it as available (container = "I have some").
-_CONTAINER_UNITS = frozenset({"whole", "jar", "bottle", "bag", "box", "packet", "pot", "tin", "pack"})
+_CONTAINER_UNITS = frozenset({
+    "whole", "jar", "bottle", "bag", "box", "packet", "pot", "tin", "pack",
+    "bundle", "bunch", "head",
+})
+
+# Informal recipe measures that can't be compared numerically to stock quantities.
+# If ANY stock exists for the named ingredient, it's considered available.
+_VAGUE_UNITS = frozenset({
+    "drizzle", "splash", "glug", "knob", "thumb", "handful",
+    "pinch", "dash", "sprig", "clove", "tbsp", "tsp", "teaspoon", "tablespoon",
+})
 
 # Ingredients in these subcategories are tracked by presence only — any stock means
 # available, regardless of quantity. They appear on the shopping list only when fully
@@ -54,16 +67,22 @@ def _check_stock(
     needed_qty: float,
     needed_unit: str,
     staple_names: frozenset[str] = frozenset(),
+    stock_names: frozenset[str] = frozenset(),
 ) -> tuple[bool, float]:
     """Return (in_stock, stock_qty).
 
     Staples (herb_spice / condiment subcategory): any stock = available,
     quantity is ignored — they only appear on the shopping list when fully gone.
 
+    Vague/informal measures (tbsp, drizzle, thumb, etc.): if ANY stock exists
+    for the ingredient, treat as available — we can't numerically compare them.
+
     Otherwise falls back to a container-unit check: if stocked as a whole container
-    (jar, bag, etc.) but the recipe measures in tsp/g/ml, treat as available.
+    (jar, bag, etc.) but the recipe measures in a specific amount, treat as available.
     """
     if name in staple_names:
+        return True, needed_qty
+    if needed_unit in _VAGUE_UNITS and name in stock_names:
         return True, needed_qty
     have = stock.get((name, needed_unit), 0.0)
     if have >= needed_qty:
@@ -473,6 +492,14 @@ async def get_meal_plan(
         key = (ing.name.lower(), unit)
         stock[key] = stock.get(key, 0) + qty
 
+    # Add frozen/fridge meal portions so "Carrot Pasta Sauce 2 portions" can match
+    all_meals = await crud.list_meals(session)
+    for meal in all_meals:
+        key = (meal.name.lower(), "portion")
+        stock[key] = meal.portions_remaining
+
+    stock_names: frozenset[str] = frozenset(k[0] for k in stock.keys())
+
     result = []
     # agg_by_date: date_str -> {(name_lower, unit): {name, needed, unit}}
     agg_by_date: dict[str, dict[tuple, dict]] = {}
@@ -486,7 +513,8 @@ async def get_meal_plan(
         ing_list = []
         for pi in ings:
             needed_qty, needed_unit = _normalise(pi.quantity, pi.unit, pi.name)
-            in_stock, have = _check_stock(stock, pi.name.lower(), needed_qty, needed_unit, staple_names)
+            resolved = _fuzzy_resolve_name(pi.name.lower(), stock_names)
+            in_stock, have = _check_stock(stock, resolved, needed_qty, needed_unit, staple_names, stock_names)
             ing_list.append({
                 "id": pi.id,
                 "name": pi.name,
@@ -513,7 +541,8 @@ async def get_meal_plan(
     for date_str, agg in agg_by_date.items():
         agg_list = []
         for (name_lower, unit), item in agg.items():
-            in_stock, have = _check_stock(stock, name_lower, item["needed"], unit, staple_names)
+            resolved = _fuzzy_resolve_name(name_lower, stock_names)
+            in_stock, have = _check_stock(stock, resolved, item["needed"], unit, staple_names, stock_names)
             shortfall = round(max(0.0, item["needed"] - have), 2) if not in_stock else 0.0
             agg_list.append({
                 "name": item["name"],
@@ -607,6 +636,9 @@ async def get_week_plan(
         qty, unit = _normalise(ing.quantity, ing.unit, ing.name)
         key = (ing.name.lower(), unit)
         stock[key] = stock.get(key, 0) + qty
+    for meal in await crud.list_meals(session):
+        stock[(meal.name.lower(), "portion")] = meal.portions_remaining
+    stock_names_wk: frozenset[str] = frozenset(k[0] for k in stock.keys())
 
     days = []
     for i in range(7):
@@ -621,7 +653,8 @@ async def get_week_plan(
             ing_list = []
             for pi in ings:
                 nq, nu = _normalise(pi.quantity, pi.unit, pi.name)
-                ok, have = _check_stock(stock, pi.name.lower(), nq, nu, staple_names)
+                resolved_wk = _fuzzy_resolve_name(pi.name.lower(), stock_names_wk)
+                ok, have = _check_stock(stock, resolved_wk, nq, nu, staple_names, stock_names_wk)
                 ing_list.append({
                     "id": pi.id, "name": pi.name,
                     "quantity": pi.quantity, "unit": pi.unit,
@@ -681,11 +714,15 @@ async def get_shopping_list(
         qty, unit = _normalise(ing.quantity, ing.unit, ing.name)
         k = (ing.name.lower(), unit)
         stock[k] = stock.get(k, 0) + qty
+    for meal in await crud.list_meals(session):
+        stock[(meal.name.lower(), "portion")] = meal.portions_remaining
+    stock_names_sl: frozenset[str] = frozenset(k[0] for k in stock.keys())
 
     shopping_list = []
     for key, item in needed.items():
         name, unit = key
-        in_stock, have = _check_stock(stock, name, item["quantity_needed"], unit, staple_names)
+        resolved_sl = _fuzzy_resolve_name(name, stock_names_sl)
+        in_stock, have = _check_stock(stock, resolved_sl, item["quantity_needed"], unit, staple_names, stock_names_sl)
         shortfall = 0.0 if in_stock else item["quantity_needed"] - have
         if shortfall > 0:
             shopping_list.append({
@@ -929,6 +966,21 @@ def _match_inventory(
         if hay == needle or needle in hay or hay in needle:
             candidates.append(ing)
     return candidates
+
+
+def _fuzzy_resolve_name(name: str, stock_names: frozenset[str]) -> str:
+    """Map a recipe ingredient name to the best matching name in the stock dict.
+
+    Tries exact match first, then substring containment in either direction
+    (e.g. "lemon" → "lemons", "fresh chives" → "chives", "tofu" → "silken tofu").
+    Returns the original name unchanged if no match is found.
+    """
+    if name in stock_names:
+        return name
+    for sn in stock_names:
+        if name in sn or sn in name:
+            return sn
+    return name
 
 
 async def preview_cook(session: AsyncSession, plan_id: int) -> dict:
