@@ -4,6 +4,11 @@ RUN apk add --no-cache git python3 make g++
 WORKDIR /app
 
 RUN git clone --depth 1 https://github.com/sjawhar/macrofactor.git .
+# Inject Referer header so Firebase accepts the web API key's HTTP-referrer restriction.
+# Also inject X-Ios-Bundle-Identifier in case the key uses iOS-bundle restrictions.
+RUN sed -i \
+    "s|const BUNDLE_ID_HEADER = {|const BUNDLE_ID_HEADER = { 'Referer': 'https://sbs-diet-app.firebaseapp.com',|" \
+    src/lib/api/auth.ts
 RUN npm install -g pnpm@9
 RUN pnpm install --no-frozen-lockfile
 RUN pnpm run build:mcp
