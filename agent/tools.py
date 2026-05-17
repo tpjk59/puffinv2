@@ -496,11 +496,12 @@ async def get_meal_plan(
                 "in_stock": in_stock,
                 "stock_qty": round(have, 2),
             })
-            # Accumulate into per-date aggregate
-            key = (pi.name.lower(), needed_unit)
-            if key not in agg_by_date[date_str]:
-                agg_by_date[date_str][key] = {"name": pi.name, "needed": 0.0, "unit": needed_unit}
-            agg_by_date[date_str][key]["needed"] += needed_qty
+            # Only uncooked plans contribute to the shopping aggregate
+            if plan.status != "cooked":
+                key = (pi.name.lower(), needed_unit)
+                if key not in agg_by_date[date_str]:
+                    agg_by_date[date_str][key] = {"name": pi.name, "needed": 0.0, "unit": needed_unit}
+                agg_by_date[date_str][key]["needed"] += needed_qty
 
         entry = _meal_plan_to_dict(plan)
         entry["ingredients"] = ing_list
