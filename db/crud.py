@@ -3,7 +3,7 @@
 from datetime import UTC, date, datetime
 from typing import Any, Optional
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from db.models import (
@@ -42,6 +42,21 @@ async def create_ingredient(
     fibre_per_100g: Optional[float] = None,
     notes: Optional[str] = None,
 ) -> Ingredient:
+    # Upsert: same name + location + unit + best_before + subcategory → add to quantity
+    q = select(Ingredient).where(
+        func.lower(Ingredient.name) == name.lower(),
+        Ingredient.location == location,
+        Ingredient.unit == unit,
+        Ingredient.subcategory == subcategory,
+    )
+    q = q.where(Ingredient.best_before.is_(None) if best_before is None else Ingredient.best_before == best_before)
+    existing = (await session.execute(q)).scalar_one_or_none()
+    if existing is not None:
+        existing.quantity += quantity
+        await session.commit()
+        await session.refresh(existing)
+        return existing
+
     ingredient = Ingredient(
         name=name,
         quantity=quantity,

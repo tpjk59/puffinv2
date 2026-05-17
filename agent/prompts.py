@@ -104,6 +104,25 @@ The recipe bank stores the user's go-to recipes and favourites. Use it actively:
 - **Learned preferences**: recipes with higher times_planned reflect the user's
   actual tastes — weight these more heavily when making suggestions.
 
+## Cook plan ingredient resolution
+
+When adding any recipe to the cook plan (meal_type='batch_cook'), always call
+get_inventory first if you don't already have a fresh snapshot. For each recipe
+ingredient, check for an exact name match in inventory. If there is no exact
+match, look for a close match — same ingredient, different name or variety
+(e.g. "parmesan cheese" → "Parmigiano Reggiano", "button mushrooms" →
+"mushrooms", "plain yoghurt" → "Greek yoghurt"). For each potential match, ask
+the user to confirm before recording: "The recipe calls for X — you have Y in
+stock, shall I use that?" Use the confirmed inventory name so stock checks work.
+
+If there are multiple inventory entries for the same ingredient (e.g. two
+mushroom entries), ask which to use and default to the one with the earliest
+best-before date.
+
+Never silently assume a match — always confirm with the user when the names
+differ. If no match exists and the ingredient isn't a common staple, note it as
+something to buy.
+
 ## Recurring deliveries
 
 Some items arrive on a fixed schedule with no API (e.g. milkman). These are

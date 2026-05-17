@@ -45,7 +45,7 @@ _CONTAINER_UNITS = frozenset({"whole", "jar", "bottle", "bag", "box", "packet", 
 # Ingredients in these subcategories are tracked by presence only — any stock means
 # available, regardless of quantity. They appear on the shopping list only when fully
 # out of stock (deleted from inventory).
-_STAPLE_SUBCATEGORIES = frozenset({"herb_spice", "condiment", "baking"})
+_STAPLE_SUBCATEGORIES = frozenset({"herb_spice", "condiment"})
 
 
 def _check_stock(
@@ -474,8 +474,15 @@ async def get_meal_plan(
         stock[key] = stock.get(key, 0) + qty
 
     result = []
+    # agg_by_date: date_str -> {(name_lower, unit): {name, needed, unit}}
+    agg_by_date: dict[str, dict[tuple, dict]] = {}
+
     for plan in plans:
         ings = await crud.list_meal_plan_ingredients(session, plan.id)
+        date_str = plan.planned_date.isoformat()
+        if date_str not in agg_by_date:
+            agg_by_date[date_str] = {}
+
         ing_list = []
         for pi in ings:
             needed_qty, needed_unit = _normalise(pi.quantity, pi.unit, pi.name)
@@ -489,11 +496,36 @@ async def get_meal_plan(
                 "in_stock": in_stock,
                 "stock_qty": round(have, 2),
             })
+            # Accumulate into per-date aggregate
+            key = (pi.name.lower(), needed_unit)
+            if key not in agg_by_date[date_str]:
+                agg_by_date[date_str][key] = {"name": pi.name, "needed": 0.0, "unit": needed_unit}
+            agg_by_date[date_str][key]["needed"] += needed_qty
+
         entry = _meal_plan_to_dict(plan)
         entry["ingredients"] = ing_list
         entry["all_in_stock"] = all(i["in_stock"] for i in ing_list) if ing_list else True
         result.append(entry)
-    return {"plans": result}
+
+    # Resolve aggregate stock checks (total needed vs total available)
+    aggregate_by_date: dict[str, list] = {}
+    for date_str, agg in agg_by_date.items():
+        agg_list = []
+        for (name_lower, unit), item in agg.items():
+            in_stock, have = _check_stock(stock, name_lower, item["needed"], unit, staple_names)
+            shortfall = round(max(0.0, item["needed"] - have), 2) if not in_stock else 0.0
+            agg_list.append({
+                "name": item["name"],
+                "needed": round(item["needed"], 2),
+                "unit": unit,
+                "in_stock": in_stock,
+                "have": round(have, 2),
+                "shortfall": shortfall,
+            })
+        agg_list.sort(key=lambda x: (x["in_stock"], x["name"]))
+        aggregate_by_date[date_str] = agg_list
+
+    return {"plans": result, "aggregate_by_date": aggregate_by_date}
 
 
 async def update_meal_plan(

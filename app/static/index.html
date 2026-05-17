@@ -437,7 +437,7 @@
     document.getElementById('cook-plan-content').innerHTML = '<div class="loading">Loading...</div>';
     try {
       const data = await safeFetch('/api/cook-plan');
-      renderCookPlan(data.plans || []);
+      renderCookPlan(data.plans || [], data.aggregate_by_date || {});
     } catch (e) {
       document.getElementById('cook-plan-content').innerHTML = '<div class="empty">Could not load cook plan</div>';
     }
@@ -518,7 +518,7 @@
       </div>`).join('');
   }
 
-  function renderCookPlan(plans) {
+  function renderCookPlan(plans, aggregateByDate) {
     const el = document.getElementById('cook-plan-content');
     if (!plans.length) {
       el.innerHTML = '<div class="empty">No cook sessions planned — ask the agent to plan batch cooking</div>';
@@ -540,11 +540,41 @@
       if (isToday) dateLabel += ' <span class="badge badge-tag">Today</span>';
       else if (dayDiff === 1) dateLabel += ' <span class="badge badge-tag">Tomorrow</span>';
 
-      return `<div style="margin-bottom:12px">
-        <div style="font-size:12px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:0.6px;padding-bottom:6px;border-bottom:2px solid var(--border);margin-bottom:2px">${dateLabel}</div>
+      const agg = aggregateByDate[dateStr] || [];
+
+      return `<div style="margin-bottom:16px">
+        <div style="font-size:12px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:0.6px;padding-bottom:6px;border-bottom:2px solid var(--border);margin-bottom:4px">${dateLabel}</div>
         ${sessions.map(renderCookSession).join('')}
+        ${agg.length ? renderAggregateIngredients(agg) : ''}
       </div>`;
     }).join('');
+  }
+
+  function renderAggregateIngredients(agg) {
+    const missing = agg.filter(i => !i.in_stock);
+    const ok = agg.filter(i => i.in_stock);
+    const rows = [...missing, ...ok].map(i => {
+      const qty = i.needed % 1 === 0 ? i.needed : i.needed.toFixed(1);
+      const haveStr = i.in_stock
+        ? (i.have % 1 === 0 ? i.have : i.have.toFixed(1))
+        : (i.have % 1 === 0 ? i.have : i.have.toFixed(1));
+      const shortfallStr = i.shortfall > 0 ? ` <span style="color:var(--warn);font-weight:600">−${i.shortfall % 1 === 0 ? i.shortfall : i.shortfall.toFixed(1)}${i.unit}</span>` : '';
+      return `<div style="display:flex;justify-content:space-between;align-items:center;padding:5px 0;border-bottom:1px solid var(--border);font-size:13px">
+        <span style="display:flex;align-items:center;gap:6px">
+          <span style="width:8px;height:8px;border-radius:50%;background:${i.in_stock ? '#52b788' : '#e76f51'};flex-shrink:0"></span>
+          ${i.name}
+        </span>
+        <span style="color:var(--muted);flex-shrink:0">${qty}${i.unit}${shortfallStr}</span>
+      </div>`;
+    }).join('');
+    const allOk = missing.length === 0;
+    return `<div style="margin-top:10px;background:var(--bg);border-radius:8px;padding:10px 12px">
+      <div style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:0.8px;color:var(--muted);margin-bottom:6px;display:flex;justify-content:space-between;align-items:center">
+        <span>All ingredients</span>
+        ${allOk ? '<span class="badge ing-ok">✓ All in stock</span>' : `<span class="badge badge-warn">${missing.length} to buy</span>`}
+      </div>
+      ${rows}
+    </div>`;
   }
 
   function renderCookSession(plan) {
