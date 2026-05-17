@@ -15,6 +15,7 @@ from db.models import (
     MealPlanIngredient,
     NutritionLog,
     Preference,
+    Recipe,
 )
 
 
@@ -290,6 +291,91 @@ async def get_all_preferences(session: AsyncSession) -> dict[str, str]:
 # ---------------------------------------------------------------------------
 # DeliverySchedule
 # ---------------------------------------------------------------------------
+
+
+# ---------------------------------------------------------------------------
+# Recipes
+# ---------------------------------------------------------------------------
+
+
+async def create_recipe(
+    session: AsyncSession,
+    name: str,
+    created_at: date,
+    source_url: Optional[str] = None,
+    cuisine_tag: Optional[str] = None,
+    tags: Optional[str] = None,
+    notes: Optional[str] = None,
+) -> Recipe:
+    recipe = Recipe(
+        name=name,
+        source_url=source_url,
+        cuisine_tag=cuisine_tag,
+        tags=tags,
+        notes=notes,
+        created_at=created_at,
+    )
+    session.add(recipe)
+    await session.commit()
+    await session.refresh(recipe)
+    return recipe
+
+
+async def get_recipe(session: AsyncSession, recipe_id: int) -> Optional[Recipe]:
+    result = await session.execute(select(Recipe).where(Recipe.id == recipe_id))
+    return result.scalar_one_or_none()
+
+
+async def get_recipe_by_url(session: AsyncSession, url: str) -> Optional[Recipe]:
+    result = await session.execute(select(Recipe).where(Recipe.source_url == url))
+    return result.scalar_one_or_none()
+
+
+async def list_recipes(
+    session: AsyncSession,
+    cuisine_tag: Optional[str] = None,
+    tag: Optional[str] = None,
+    search: Optional[str] = None,
+) -> list[Recipe]:
+    from sqlalchemy import func
+    query = select(Recipe)
+    if cuisine_tag is not None:
+        query = query.where(Recipe.cuisine_tag == cuisine_tag)
+    if tag is not None:
+        # Match whole tag token within comma-separated string
+        query = query.where(
+            (Recipe.tags == tag)
+            | Recipe.tags.like(f"{tag},%")
+            | Recipe.tags.like(f"%,{tag},%")
+            | Recipe.tags.like(f"%,{tag}")
+        )
+    if search is not None:
+        query = query.where(Recipe.name.ilike(f"%{search}%"))
+    query = query.order_by(Recipe.times_planned.desc(), Recipe.name)
+    result = await session.execute(query)
+    return list(result.scalars().all())
+
+
+async def update_recipe(
+    session: AsyncSession, recipe_id: int, updates: dict[str, Any]
+) -> Optional[Recipe]:
+    recipe = await get_recipe(session, recipe_id)
+    if recipe is None:
+        return None
+    for key, value in updates.items():
+        setattr(recipe, key, value)
+    await session.commit()
+    await session.refresh(recipe)
+    return recipe
+
+
+async def delete_recipe(session: AsyncSession, recipe_id: int) -> bool:
+    recipe = await get_recipe(session, recipe_id)
+    if recipe is None:
+        return False
+    await session.delete(recipe)
+    await session.commit()
+    return True
 
 
 async def create_delivery_schedule(

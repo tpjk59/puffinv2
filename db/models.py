@@ -126,6 +126,22 @@ class MealPlanIngredient(Base):
     plan: Mapped["MealPlan"] = relationship("MealPlan", back_populates="ingredients")
 
 
+class Recipe(Base):
+    __tablename__ = "recipes"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    name: Mapped[str] = mapped_column(String(255), nullable=False)
+    source_url: Mapped[Optional[str]] = mapped_column(String(500), nullable=True)
+    cuisine_tag: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
+    # Comma-separated tags: quick, batch_cook, vegetarian, vegan, weekend, light,
+    # freezer_friendly, favourite
+    tags: Mapped[Optional[str]] = mapped_column(String(500), nullable=True)
+    notes: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    times_planned: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    last_planned: Mapped[Optional[date]] = mapped_column(Date, nullable=True)
+    created_at: Mapped[date] = mapped_column(Date, nullable=False)
+
+
 class DeliverySchedule(Base):
     __tablename__ = "delivery_schedule"
 

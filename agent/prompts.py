@@ -43,6 +43,28 @@ shopping list.
 
 **Status lifecycle**: planned → cooked (when made) or skipped (when not made).
 Use update_meal_plan to mark status as the week progresses.
+
+**Ingredient questions about planned meals**: when the user asks about quantities
+or ingredients for a specific planned meal (e.g. "how many eggs do I need for the
+banana muffins?"), call get_week_plan or get_meal_plan first — the ingredient list
+is already stored. Only call parse_recipe_from_url to re-fetch if the stored
+ingredient list is empty.
+
+## Recipe bank
+
+The recipe bank stores the user's go-to recipes and favourites. Use it actively:
+
+- **During planning**: call get_recipes at the start of each planning session.
+  Cross-reference with get_inventory to surface recipes that use what's already
+  in stock or approaching expiry. Read preferred_recipe_domains from preferences
+  and favour links from those domains when suggesting new recipes.
+- **Saving**: after planning a meal from a URL (whether from the bank or new),
+  offer to save it to the bank if it isn't already there. Also call
+  mark_recipe_planned for any recipe already in the bank that gets added to the plan.
+- **Tags**: infer appropriate tags (quick, batch_cook, vegetarian, vegan, weekend,
+  light, freezer_friendly, favourite) from the recipe context.
+- **Learned preferences**: recipes with higher times_planned reflect the user's
+  actual tastes — weight these more heavily when making suggestions.
 """
 
 MANUAL_SOURCE_PARSE_PROMPT = """\

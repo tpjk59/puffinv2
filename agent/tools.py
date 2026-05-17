@@ -751,6 +751,93 @@ async def parse_recipe_from_url(session: AsyncSession, url: str) -> dict:
     return {"recipe": recipe, "source_url": url}
 
 
+def _recipe_to_dict(r) -> dict:
+    return {
+        "id": r.id,
+        "name": r.name,
+        "source_url": r.source_url,
+        "cuisine_tag": r.cuisine_tag,
+        "tags": r.tags,
+        "notes": r.notes,
+        "times_planned": r.times_planned,
+        "last_planned": r.last_planned.isoformat() if r.last_planned else None,
+        "created_at": r.created_at.isoformat(),
+    }
+
+
+async def save_recipe(
+    session: AsyncSession,
+    name: str,
+    source_url: Optional[str] = None,
+    cuisine_tag: Optional[str] = None,
+    tags: Optional[str] = None,
+    notes: Optional[str] = None,
+) -> dict:
+    """Save a recipe to the bank. Deduplicates by URL if provided."""
+    if source_url:
+        existing = await crud.get_recipe_by_url(session, source_url)
+        if existing is not None:
+            # Update metadata if provided, return existing
+            updates: dict[str, Any] = {}
+            if name:
+                updates["name"] = name
+            if cuisine_tag is not None:
+                updates["cuisine_tag"] = cuisine_tag
+            if tags is not None:
+                updates["tags"] = tags
+            if notes is not None:
+                updates["notes"] = notes
+            if updates:
+                existing = await crud.update_recipe(session, existing.id, updates)
+            return {"recipe": _recipe_to_dict(existing), "status": "updated_existing"}
+
+    recipe = await crud.create_recipe(
+        session,
+        name=name,
+        created_at=date.today(),
+        source_url=source_url,
+        cuisine_tag=cuisine_tag,
+        tags=tags,
+        notes=notes,
+    )
+    return {"recipe": _recipe_to_dict(recipe), "status": "saved"}
+
+
+async def get_recipes(
+    session: AsyncSession,
+    search: Optional[str] = None,
+    cuisine_tag: Optional[str] = None,
+    tag: Optional[str] = None,
+    limit: int = 20,
+) -> dict:
+    recipes = await crud.list_recipes(session, cuisine_tag=cuisine_tag, tag=tag, search=search)
+    return {
+        "recipes": [_recipe_to_dict(r) for r in recipes[:limit]],
+        "count": len(recipes),
+    }
+
+
+async def delete_recipe_from_bank(session: AsyncSession, recipe_id: int) -> dict:
+    deleted = await crud.delete_recipe(session, recipe_id)
+    if not deleted:
+        return {"error": f"Recipe {recipe_id} not found"}
+    return {"status": "deleted", "recipe_id": recipe_id}
+
+
+async def mark_recipe_planned(
+    session: AsyncSession,
+    recipe_id: int,
+) -> dict:
+    """Increment times_planned and set last_planned to today. Call when planning a meal from the bank."""
+    updates = {"times_planned": None, "last_planned": date.today()}
+    recipe = await crud.get_recipe(session, recipe_id)
+    if recipe is None:
+        return {"error": f"Recipe {recipe_id} not found"}
+    updates["times_planned"] = recipe.times_planned + 1
+    updated = await crud.update_recipe(session, recipe_id, updates)
+    return {"recipe": _recipe_to_dict(updated)}
+
+
 # ---------------------------------------------------------------------------
 # Dispatch
 # ---------------------------------------------------------------------------
@@ -777,6 +864,10 @@ _HANDLERS = {
     "remove_from_meal_plan": remove_from_meal_plan,
     "get_shopping_list": get_shopping_list,
     "parse_recipe_from_url": parse_recipe_from_url,
+    "save_recipe": save_recipe,
+    "get_recipes": get_recipes,
+    "delete_recipe_from_bank": delete_recipe_from_bank,
+    "mark_recipe_planned": mark_recipe_planned,
 }
 
 
@@ -1213,6 +1304,80 @@ TOOL_DEFINITIONS: list[dict] = [
                     "description": "ISO date of Monday. If provided, only includes plans for that week.",
                 },
             },
+        },
+    },
+    {
+        "name": "save_recipe",
+        "description": (
+            "Save a recipe to the recipe bank. "
+            "Deduplicates by URL — if the URL already exists, updates metadata instead. "
+            "Call after parse_recipe_from_url when the user wants to keep a recipe, "
+            "or when they say 'save this recipe' / 'add to my recipe bank'. "
+            "Also call when saving a recipe that was just added to the meal plan."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "name": {"type": "string"},
+                "source_url": {"type": "string", "description": "Recipe URL."},
+                "cuisine_tag": {"type": "string"},
+                "tags": {
+                    "type": "string",
+                    "description": (
+                        "Comma-separated tags. Valid values: quick, batch_cook, vegetarian, "
+                        "vegan, weekend, light, freezer_friendly, favourite."
+                    ),
+                },
+                "notes": {"type": "string", "description": "Personal notes, e.g. 'great with rice'."},
+            },
+            "required": ["name"],
+        },
+    },
+    {
+        "name": "get_recipes",
+        "description": (
+            "Search the recipe bank. Results are sorted by times_planned descending so "
+            "frequently used recipes surface first. "
+            "Use during planning sessions to find relevant recipes — cross-reference with "
+            "get_inventory to surface options that use what's already in stock. "
+            "Read preferred_recipe_domains from preferences and favour those sources when suggesting."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "search": {"type": "string", "description": "Partial name match."},
+                "cuisine_tag": {"type": "string", "description": "Filter by cuisine."},
+                "tag": {
+                    "type": "string",
+                    "description": "Filter by single tag, e.g. 'quick' or 'batch_cook'.",
+                },
+                "limit": {"type": "integer", "description": "Max results. Defaults to 20."},
+            },
+        },
+    },
+    {
+        "name": "delete_recipe_from_bank",
+        "description": "Remove a recipe from the recipe bank. Does not affect the meal plan.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "recipe_id": {"type": "integer"},
+            },
+            "required": ["recipe_id"],
+        },
+    },
+    {
+        "name": "mark_recipe_planned",
+        "description": (
+            "Increment times_planned and set last_planned to today for a recipe in the bank. "
+            "Call this whenever a recipe from the bank is added to the meal plan."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "recipe_id": {"type": "integer"},
+            },
+            "required": ["recipe_id"],
         },
     },
     {

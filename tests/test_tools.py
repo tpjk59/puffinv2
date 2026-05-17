@@ -908,3 +908,108 @@ async def test_get_delivery_schedule_filter_by_source(db_session: AsyncSession) 
     result = await tools.get_delivery_schedule(db_session, source_label="veg_box")
     assert len(result["schedules"]) == 1
     assert result["schedules"][0]["source_label"] == "veg_box"
+
+
+# ---------------------------------------------------------------------------
+# Recipe bank
+# ---------------------------------------------------------------------------
+
+
+async def test_save_recipe_creates_entry(db_session: AsyncSession) -> None:
+    result = await tools.save_recipe(
+        db_session,
+        name="Chicken Tikka Masala",
+        source_url="https://example.com/tikka",
+        cuisine_tag="south-asian",
+        tags="batch_cook,freezer_friendly",
+        notes="Great with basmati rice",
+    )
+    assert result["status"] == "saved"
+    r = result["recipe"]
+    assert r["name"] == "Chicken Tikka Masala"
+    assert r["cuisine_tag"] == "south-asian"
+    assert r["tags"] == "batch_cook,freezer_friendly"
+    assert r["times_planned"] == 0
+
+
+async def test_save_recipe_deduplicates_by_url(db_session: AsyncSession) -> None:
+    await tools.save_recipe(db_session, name="Tikka", source_url="https://example.com/tikka")
+    result = await tools.save_recipe(
+        db_session,
+        name="Chicken Tikka Masala",
+        source_url="https://example.com/tikka",
+        notes="Updated notes",
+    )
+    assert result["status"] == "updated_existing"
+    assert result["recipe"]["name"] == "Chicken Tikka Masala"
+    assert result["recipe"]["notes"] == "Updated notes"
+    # Only one entry should exist
+    all_recipes = await tools.get_recipes(db_session)
+    assert all_recipes["count"] == 1
+
+
+async def test_save_recipe_no_url_allows_duplicates(db_session: AsyncSession) -> None:
+    await tools.save_recipe(db_session, name="Roast Chicken")
+    await tools.save_recipe(db_session, name="Roast Chicken")
+    result = await tools.get_recipes(db_session)
+    assert result["count"] == 2
+
+
+async def test_get_recipes_search(db_session: AsyncSession) -> None:
+    await tools.save_recipe(db_session, name="Lentil Dal", cuisine_tag="south-asian", tags="quick,vegetarian")
+    await tools.save_recipe(db_session, name="Chicken Curry", cuisine_tag="south-asian", tags="batch_cook")
+    await tools.save_recipe(db_session, name="Pasta Bake", cuisine_tag="italian", tags="quick")
+
+    by_name = await tools.get_recipes(db_session, search="dal")
+    assert by_name["count"] == 1
+    assert by_name["recipes"][0]["name"] == "Lentil Dal"
+
+    by_cuisine = await tools.get_recipes(db_session, cuisine_tag="south-asian")
+    assert by_cuisine["count"] == 2
+
+    by_tag = await tools.get_recipes(db_session, tag="quick")
+    names = {r["name"] for r in by_tag["recipes"]}
+    assert names == {"Lentil Dal", "Pasta Bake"}
+
+
+async def test_get_recipes_sorted_by_times_planned(db_session: AsyncSession) -> None:
+    await crud.create_recipe(db_session, name="Rarely made", created_at=date.today())
+    await crud.create_recipe(db_session, name="Often made", created_at=date.today())
+    often = (await crud.list_recipes(db_session, search="Often made"))[0]
+    await crud.update_recipe(db_session, often.id, {"times_planned": 5})
+
+    result = await tools.get_recipes(db_session)
+    assert result["recipes"][0]["name"] == "Often made"
+
+
+async def test_mark_recipe_planned(db_session: AsyncSession) -> None:
+    saved = await tools.save_recipe(db_session, name="Fish Pie", source_url="https://example.com/fish")
+    recipe_id = saved["recipe"]["id"]
+
+    await tools.mark_recipe_planned(db_session, recipe_id=recipe_id)
+    await tools.mark_recipe_planned(db_session, recipe_id=recipe_id)
+
+    result = await tools.get_recipes(db_session)
+    assert result["recipes"][0]["times_planned"] == 2
+    assert result["recipes"][0]["last_planned"] == date.today().isoformat()
+
+
+async def test_mark_recipe_planned_not_found(db_session: AsyncSession) -> None:
+    result = await tools.mark_recipe_planned(db_session, recipe_id=9999)
+    assert "error" in result
+
+
+async def test_delete_recipe_from_bank(db_session: AsyncSession) -> None:
+    saved = await tools.save_recipe(db_session, name="To Delete", source_url="https://example.com/del")
+    recipe_id = saved["recipe"]["id"]
+
+    result = await tools.delete_recipe_from_bank(db_session, recipe_id=recipe_id)
+    assert result["status"] == "deleted"
+
+    all_recipes = await tools.get_recipes(db_session)
+    assert all_recipes["count"] == 0
+
+
+async def test_delete_recipe_from_bank_not_found(db_session: AsyncSession) -> None:
+    result = await tools.delete_recipe_from_bank(db_session, recipe_id=9999)
+    assert "error" in result
