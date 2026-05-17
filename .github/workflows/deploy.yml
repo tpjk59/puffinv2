@@ -15,6 +15,7 @@ jobs:
         env:
           FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
       - name: Deploy puffin-mcp
-        run: flyctl deploy --remote-only --config macrofactor-mcp/fly.toml --dockerfile macrofactor-mcp/Dockerfile
+        run: flyctl deploy --remote-only
+        working-directory: macrofactor-mcp
         env:
           FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
