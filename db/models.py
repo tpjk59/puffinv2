@@ -98,6 +98,7 @@ class MealPlan(Base):
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     name: Mapped[str] = mapped_column(String(255), nullable=False)
+    meal_type: Mapped[Optional[str]] = mapped_column(String(20), nullable=True)
     cuisine_tag: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
     planned_date: Mapped[date] = mapped_column(Date, nullable=False)
     servings: Mapped[int] = mapped_column(Integer, nullable=False, default=2)

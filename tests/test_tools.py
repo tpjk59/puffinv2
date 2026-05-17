@@ -725,6 +725,129 @@ async def test_get_shopping_list_all_in_stock(db_session: AsyncSession) -> None:
     assert result["shopping_list"] == []
 
 
+# ---------------------------------------------------------------------------
+# get_week_plan
+# ---------------------------------------------------------------------------
+
+
+async def test_plan_meal_stores_meal_type(db_session: AsyncSession) -> None:
+    result = await tools.plan_meal(
+        db_session,
+        name="Roast Chicken",
+        planned_date="2026-05-24",
+        meal_type="dinner",
+        ingredients=[{"name": "whole chicken", "quantity": 1, "unit": "whole"}],
+    )
+    assert result["meal_type"] == "dinner"
+
+
+async def test_plan_meal_brunch_type(db_session: AsyncSession) -> None:
+    result = await tools.plan_meal(
+        db_session,
+        name="Full English",
+        planned_date="2026-05-23",
+        meal_type="brunch",
+        ingredients=[{"name": "eggs", "quantity": 2, "unit": "whole"}],
+    )
+    assert result["meal_type"] == "brunch"
+
+
+async def test_get_week_plan_empty_returns_seven_days(db_session: AsyncSession) -> None:
+    result = await tools.get_week_plan(db_session, week_start="2026-05-18")
+    assert len(result["days"]) == 7
+    assert result["week_start"] == "2026-05-18"
+    assert result["week_end"] == "2026-05-24"
+    for day in result["days"]:
+        assert day["slots"] == {}
+
+
+async def test_get_week_plan_meals_in_correct_slots(db_session: AsyncSession) -> None:
+    await tools.plan_meal(
+        db_session, name="Chicken Curry", planned_date="2026-05-20",
+        meal_type="dinner",
+        ingredients=[{"name": "chicken", "quantity": 500, "unit": "g"}],
+    )
+    await tools.plan_meal(
+        db_session, name="Leftover Curry", planned_date="2026-05-21",
+        meal_type="lunch",
+        ingredients=[{"name": "chicken", "quantity": 200, "unit": "g"}],
+    )
+    result = await tools.get_week_plan(db_session, week_start="2026-05-18")
+    # Wednesday (index 2) should have dinner
+    wed = next(d for d in result["days"] if d["date"] == "2026-05-20")
+    assert "dinner" in wed["slots"]
+    assert wed["slots"]["dinner"]["name"] == "Chicken Curry"
+    # Thursday (index 3) should have lunch
+    thu = next(d for d in result["days"] if d["date"] == "2026-05-21")
+    assert "lunch" in thu["slots"]
+    assert thu["slots"]["lunch"]["name"] == "Leftover Curry"
+
+
+async def test_get_week_plan_brunch_in_slot(db_session: AsyncSession) -> None:
+    await tools.plan_meal(
+        db_session, name="Full English", planned_date="2026-05-23",
+        meal_type="brunch",
+        ingredients=[{"name": "eggs", "quantity": 2, "unit": "whole"}],
+    )
+    result = await tools.get_week_plan(db_session, week_start="2026-05-18")
+    sat = next(d for d in result["days"] if d["date"] == "2026-05-23")
+    assert sat["is_weekend"] is True
+    assert "brunch" in sat["slots"]
+    assert sat["slots"]["brunch"]["name"] == "Full English"
+
+
+async def test_get_week_plan_availability_in_slots(db_session: AsyncSession) -> None:
+    await crud.create_ingredient(
+        db_session, name="salmon fillet", quantity=400, unit="g",
+        source_label="manual", location="fresh", arrived_date=date.today(),
+    )
+    await tools.plan_meal(
+        db_session, name="Salmon with veg", planned_date="2026-05-19",
+        meal_type="dinner",
+        ingredients=[
+            {"name": "salmon fillet", "quantity": 300, "unit": "g"},
+            {"name": "asparagus", "quantity": 200, "unit": "g"},
+        ],
+    )
+    result = await tools.get_week_plan(db_session, week_start="2026-05-18")
+    tue = next(d for d in result["days"] if d["date"] == "2026-05-19")
+    meal = tue["slots"]["dinner"]
+    ings = {i["name"]: i for i in meal["ingredients"]}
+    assert ings["salmon fillet"]["in_stock"] is True
+    assert ings["asparagus"]["in_stock"] is False
+    assert meal["all_in_stock"] is False
+
+
+async def test_get_shopping_list_scoped_to_week(db_session: AsyncSession) -> None:
+    # Plan one meal this week, one next week
+    this_monday = "2026-05-18"
+    next_monday = "2026-05-25"
+    await tools.plan_meal(
+        db_session, name="This Week Meal", planned_date="2026-05-20",
+        meal_type="dinner",
+        ingredients=[{"name": "courgette", "quantity": 2, "unit": "whole"}],
+    )
+    await tools.plan_meal(
+        db_session, name="Next Week Meal", planned_date="2026-05-27",
+        meal_type="dinner",
+        ingredients=[{"name": "aubergine", "quantity": 1, "unit": "whole"}],
+    )
+    this_week = await tools.get_shopping_list(db_session, week_start=this_monday)
+    next_week = await tools.get_shopping_list(db_session, week_start=next_monday)
+
+    this_names = [i["name"] for i in this_week["shopping_list"]]
+    next_names = [i["name"] for i in next_week["shopping_list"]]
+    assert "courgette" in this_names
+    assert "aubergine" not in this_names
+    assert "aubergine" in next_names
+    assert "courgette" not in next_names
+
+
+# ---------------------------------------------------------------------------
+# parse_recipe_from_url
+# ---------------------------------------------------------------------------
+
+
 async def test_parse_recipe_from_url_success(db_session: AsyncSession) -> None:
     from unittest.mock import AsyncMock, MagicMock, patch
 

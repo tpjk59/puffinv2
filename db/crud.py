@@ -331,6 +331,7 @@ async def create_meal_plan(
     session: AsyncSession,
     name: str,
     planned_date: date,
+    meal_type: Optional[str] = None,
     servings: int = 2,
     cuisine_tag: Optional[str] = None,
     source_url: Optional[str] = None,
@@ -338,6 +339,7 @@ async def create_meal_plan(
 ) -> MealPlan:
     plan = MealPlan(
         name=name,
+        meal_type=meal_type,
         planned_date=planned_date,
         servings=servings,
         cuisine_tag=cuisine_tag,

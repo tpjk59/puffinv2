@@ -123,6 +123,7 @@ def _meal_plan_to_dict(plan) -> dict:
     return {
         "id": plan.id,
         "name": plan.name,
+        "meal_type": plan.meal_type,
         "cuisine_tag": plan.cuisine_tag,
         "planned_date": plan.planned_date.isoformat(),
         "servings": plan.servings,
@@ -475,7 +476,8 @@ async def plan_meal(
     session: AsyncSession,
     name: str,
     planned_date: str,
-    ingredients: list[dict],
+    meal_type: str = "dinner",
+    ingredients: Optional[list[dict]] = None,
     servings: int = 2,
     cuisine_tag: Optional[str] = None,
     source_url: Optional[str] = None,
@@ -484,13 +486,14 @@ async def plan_meal(
     plan = await crud.create_meal_plan(
         session,
         name=name,
+        meal_type=meal_type,
         planned_date=date.fromisoformat(planned_date),
         servings=servings,
         cuisine_tag=cuisine_tag,
         source_url=source_url,
         notes=notes,
     )
-    for item in ingredients:
+    for item in (ingredients or []):
         await crud.add_meal_plan_ingredient(
             session, plan.id,
             item["name"], float(item["quantity"]), item["unit"],
@@ -554,6 +557,7 @@ async def update_meal_plan(
     session: AsyncSession,
     plan_id: int,
     name: Optional[str] = None,
+    meal_type: Optional[str] = None,
     planned_date: Optional[str] = None,
     servings: Optional[int] = None,
     cuisine_tag: Optional[str] = None,
@@ -565,6 +569,8 @@ async def update_meal_plan(
     updates: dict[str, Any] = {}
     if name is not None:
         updates["name"] = name
+    if meal_type is not None:
+        updates["meal_type"] = meal_type
     if planned_date is not None:
         updates["planned_date"] = date.fromisoformat(planned_date)
     if servings is not None:
@@ -599,9 +605,74 @@ async def remove_from_meal_plan(session: AsyncSession, plan_id: int) -> dict:
     return {"status": "removed", "plan_id": plan_id}
 
 
-async def get_shopping_list(session: AsyncSession) -> dict:
+async def get_week_plan(
+    session: AsyncSession,
+    week_start: Optional[str] = None,
+) -> dict:
+    """Return a Mon–Sun weekly grid with lunch/brunch and dinner slots per day."""
     today = date.today()
-    plans = await crud.list_meal_plans(session, from_date=today, status="planned")
+    if week_start:
+        ws = date.fromisoformat(week_start)
+    elif today.weekday() >= 5:  # Sat or Sun → upcoming Monday
+        ws = today + timedelta(days=(7 - today.weekday()) % 7)
+    else:  # weekday → current Monday
+        ws = today - timedelta(days=today.weekday())
+    we = ws + timedelta(days=6)
+
+    plans = await crud.list_meal_plans(session, from_date=ws, to_date=we)
+
+    all_inventory = await crud.list_ingredients(session)
+    stock: dict[tuple, float] = {}
+    staple_names: frozenset[str] = frozenset(
+        ing.name.lower() for ing in all_inventory if ing.subcategory in _STAPLE_SUBCATEGORIES
+    )
+    for ing in all_inventory:
+        qty, unit = _normalise(ing.quantity, ing.unit, ing.name)
+        key = (ing.name.lower(), unit)
+        stock[key] = stock.get(key, 0) + qty
+
+    days = []
+    for i in range(7):
+        day = ws + timedelta(days=i)
+        day_plans = [p for p in plans if p.planned_date == day]
+        slots: dict[str, dict] = {}
+        for plan in day_plans:
+            mt = plan.meal_type or "dinner"
+            ings = await crud.list_meal_plan_ingredients(session, plan.id)
+            ing_list = []
+            for pi in ings:
+                nq, nu = _normalise(pi.quantity, pi.unit, pi.name)
+                ok, have = _check_stock(stock, pi.name.lower(), nq, nu, staple_names)
+                ing_list.append({
+                    "id": pi.id, "name": pi.name,
+                    "quantity": pi.quantity, "unit": pi.unit,
+                    "in_stock": ok,
+                })
+            entry = _meal_plan_to_dict(plan)
+            entry["ingredients"] = ing_list
+            entry["all_in_stock"] = all(x["in_stock"] for x in ing_list) if ing_list else True
+            slots[mt] = entry
+        days.append({
+            "date": day.isoformat(),
+            "weekday": day.strftime("%A"),
+            "is_weekend": day.weekday() >= 5,
+            "slots": slots,
+        })
+
+    return {"week_start": ws.isoformat(), "week_end": we.isoformat(), "days": days}
+
+
+async def get_shopping_list(
+    session: AsyncSession,
+    week_start: Optional[str] = None,
+) -> dict:
+    today = date.today()
+    if week_start:
+        ws = date.fromisoformat(week_start)
+        we = ws + timedelta(days=6)
+        plans = await crud.list_meal_plans(session, from_date=ws, to_date=we, status="planned")
+    else:
+        plans = await crud.list_meal_plans(session, from_date=today, status="planned")
 
     # Aggregate needed quantities in normalised units so kg/g etc. are comparable
     needed: dict[tuple, dict] = {}
@@ -701,6 +772,7 @@ _HANDLERS = {
     "get_delivery_schedule": get_delivery_schedule,
     "plan_meal": plan_meal,
     "get_meal_plan": get_meal_plan,
+    "get_week_plan": get_week_plan,
     "update_meal_plan": update_meal_plan,
     "remove_from_meal_plan": remove_from_meal_plan,
     "get_shopping_list": get_shopping_list,
@@ -995,14 +1067,24 @@ TOOL_DEFINITIONS: list[dict] = [
         "name": "plan_meal",
         "description": (
             "Add a meal to the plan for a specific date. "
-            "Pass ingredients as a list of {name, quantity, unit}. "
-            "Does NOT touch inventory — planning is separate from cooking."
+            "Always fetch the recipe (parse_recipe_from_url) before calling this so ingredients "
+            "can be populated and availability checking works from the start. "
+            "Does NOT touch inventory — planning is separate from cooking. "
+            "For 'eating out', set name='Eating out' with no ingredients."
         ),
         "input_schema": {
             "type": "object",
             "properties": {
                 "name": {"type": "string"},
                 "planned_date": {"type": "string", "description": "ISO date YYYY-MM-DD."},
+                "meal_type": {
+                    "type": "string",
+                    "enum": ["lunch", "brunch", "dinner"],
+                    "description": (
+                        "Slot in the day. Use 'brunch' for weekend/holiday midday meals "
+                        "that replace both breakfast and lunch. Defaults to 'dinner'."
+                    ),
+                },
                 "ingredients": {
                     "type": "array",
                     "description": "Ingredient list for this meal.",
@@ -1022,7 +1104,7 @@ TOOL_DEFINITIONS: list[dict] = [
                 "source_url": {"type": "string", "description": "Recipe URL if applicable."},
                 "notes": {"type": "string"},
             },
-            "required": ["name", "planned_date", "ingredients"],
+            "required": ["name", "planned_date", "meal_type"],
         },
     },
     {
@@ -1050,16 +1132,21 @@ TOOL_DEFINITIONS: list[dict] = [
     },
     {
         "name": "update_meal_plan",
-        "description": "Update a meal plan entry — change date, name, servings, status, or replace the ingredient list.",
+        "description": "Update a meal plan entry — change date, meal_type, name, servings, status, or replace the ingredient list.",
         "input_schema": {
             "type": "object",
             "properties": {
                 "plan_id": {"type": "integer"},
                 "name": {"type": "string"},
+                "meal_type": {"type": "string", "enum": ["lunch", "brunch", "dinner"]},
                 "planned_date": {"type": "string", "description": "ISO date YYYY-MM-DD."},
                 "servings": {"type": "integer"},
                 "cuisine_tag": {"type": "string"},
-                "status": {"type": "string", "enum": ["planned", "cooked", "skipped"]},
+                "status": {
+                    "type": "string",
+                    "enum": ["planned", "cooked", "skipped"],
+                    "description": "Use 'skipped' when a planned meal wasn't made.",
+                },
                 "source_url": {"type": "string"},
                 "notes": {"type": "string"},
                 "ingredients": {
@@ -1092,13 +1179,41 @@ TOOL_DEFINITIONS: list[dict] = [
         },
     },
     {
+        "name": "get_week_plan",
+        "description": (
+            "Return the Mon–Sun meal plan grid for a given week. "
+            "Each day has a 'slots' dict keyed by meal_type (lunch, brunch, dinner) with availability info. "
+            "Use this at the start of a planning session — call it first to show what's already planned "
+            "and what slots are empty. "
+            "Defaults to the upcoming Monday if today is Sat/Sun, otherwise the current Monday."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "week_start": {
+                    "type": "string",
+                    "description": "ISO date of the Monday to view. Omit for the default week.",
+                },
+            },
+        },
+    },
+    {
         "name": "get_shopping_list",
         "description": (
-            "Generate a shopping list: ingredients needed for upcoming planned meals (status=planned) "
-            "that are not sufficiently in stock. Returns items with quantity_to_buy and which plans need them. "
-            "Staples (herb_spice / condiment subcategory) only appear here if completely out of stock."
+            "Generate a shopping list: ingredients needed for planned meals that are not sufficiently "
+            "in stock. Returns items with quantity_to_buy and which plans need them. "
+            "Staples (herb_spice / condiment subcategory) only appear here if completely out of stock. "
+            "Optionally scope to a single week with week_start."
         ),
-        "input_schema": {"type": "object", "properties": {}},
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "week_start": {
+                    "type": "string",
+                    "description": "ISO date of Monday. If provided, only includes plans for that week.",
+                },
+            },
+        },
     },
     {
         "name": "parse_recipe_from_url",

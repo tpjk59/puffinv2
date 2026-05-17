@@ -190,37 +190,81 @@
     .delivery-source { font-weight: 500; }
     .delivery-meta   { color: var(--muted); }
 
-    /* ── Meal plan ── */
-    .plan-item {
-      padding: 10px 0;
-      border-bottom: 1px solid var(--border);
-    }
-    .plan-item:last-child { border-bottom: none; }
-    .plan-header {
+    /* ── Meal plan / weekly grid ── */
+    .week-nav {
       display: flex;
-      justify-content: space-between;
-      align-items: flex-start;
-      gap: 8px;
+      align-items: center;
+      gap: 10px;
+    }
+    .week-nav-btn {
+      background: var(--bg);
+      border: 1.5px solid var(--border);
+      border-radius: 8px;
+      padding: 3px 10px;
+      cursor: pointer;
+      font-size: 15px;
+      color: var(--text);
+      line-height: 1.4;
+    }
+    .week-nav-btn:hover { border-color: var(--accent); color: var(--accent); }
+    #week-label { font-size: 13px; font-weight: 600; color: var(--text); min-width: 120px; text-align: center; }
+
+    .week-grid { display: flex; flex-direction: column; }
+    .week-col-headers {
+      display: grid;
+      grid-template-columns: 72px 1fr 1fr;
+      gap: 6px;
+      padding-bottom: 6px;
+      border-bottom: 2px solid var(--border);
       margin-bottom: 4px;
     }
-    .plan-name { font-weight: 500; }
-    .plan-date { font-size: 13px; color: var(--muted); flex-shrink: 0; }
-    .plan-ings {
+    .week-col-header {
+      font-size: 10px;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.8px;
+      color: var(--muted);
+      padding-left: 4px;
+    }
+    .week-row {
+      display: grid;
+      grid-template-columns: 72px 1fr 1fr;
+      gap: 6px;
+      padding: 5px 0;
+      border-bottom: 1px solid var(--border);
+      align-items: start;
+    }
+    .week-row:last-child { border-bottom: none; }
+    .week-row.is-today .week-day-label { color: var(--accent); font-weight: 700; }
+    .week-day-label {
       font-size: 12px;
       color: var(--muted);
-      display: flex;
-      flex-wrap: wrap;
-      gap: 4px;
-      margin-top: 5px;
-    }
-    .ing-chip {
-      padding: 2px 7px;
-      border-radius: 10px;
-      font-size: 11px;
+      padding-top: 7px;
       font-weight: 500;
     }
+    .week-slot {
+      background: var(--bg);
+      border-radius: 8px;
+      padding: 7px 9px;
+      min-height: 38px;
+    }
+    .week-slot.empty {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      color: var(--border);
+      font-size: 16px;
+      font-weight: 300;
+    }
+    .week-slot-type { font-size: 10px; text-transform: uppercase; letter-spacing: 0.5px; color: var(--muted); margin-bottom: 2px; }
+    .week-slot-name { font-weight: 500; font-size: 13px; line-height: 1.3; }
+    .week-slot-name a { color: inherit; text-decoration: none; }
+    .week-slot-name a:hover { text-decoration: underline; }
+    .week-slot-badges { display: flex; gap: 4px; flex-wrap: wrap; margin-top: 4px; }
+
     .ing-ok   { background: #d1fae5; color: #065f46; }
     .ing-miss { background: var(--warn-softer); color: #842029; }
+    .badge-skipped { background: var(--border); color: var(--muted); }
 
     /* ── Empty state ── */
     .empty {
@@ -279,8 +323,15 @@
 
   <!-- Meal plan -->
   <div class="card">
-    <div class="card-title">Meal plan</div>
-    <div id="meal-plan-content"><div class="loading">Loading...</div></div>
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px">
+      <div class="card-title" style="margin-bottom:0">Meal plan</div>
+      <div class="week-nav">
+        <button class="week-nav-btn" onclick="shiftWeek(-7)">&#8592;</button>
+        <span id="week-label"></span>
+        <button class="week-nav-btn" onclick="shiftWeek(7)">&#8594;</button>
+      </div>
+    </div>
+    <div id="week-plan-content"><div class="loading">Loading...</div></div>
   </div>
 
   <!-- Delivery history -->
@@ -293,10 +344,33 @@
 
 <script>
   const TODAY = new Date();
+  TODAY.setHours(0, 0, 0, 0);
 
   // Header date
   document.getElementById('header-date').textContent =
     TODAY.toLocaleDateString('en-GB', { weekday: 'long', day: 'numeric', month: 'long' });
+
+  // Week navigation state
+  let currentWeekStart = getDefaultWeekStart();
+
+  function getDefaultWeekStart() {
+    const d = new Date(TODAY);
+    const wd = d.getDay(); // 0=Sun, 1=Mon, …, 6=Sat
+    if (wd === 0)      d.setDate(d.getDate() + 1);  // Sun → next Mon
+    else if (wd === 6) d.setDate(d.getDate() + 2);  // Sat → next Mon
+    else               d.setDate(d.getDate() - (wd - 1)); // weekday → this Mon
+    return d;
+  }
+
+  function toISODate(d) {
+    return d.toISOString().split('T')[0];
+  }
+
+  function shiftWeek(days) {
+    currentWeekStart = new Date(currentWeekStart);
+    currentWeekStart.setDate(currentWeekStart.getDate() + days);
+    loadWeekPlan();
+  }
 
   function daysUntil(iso) {
     if (!iso) return null;
@@ -307,14 +381,13 @@
   async function loadAll() {
     document.getElementById('refresh-btn').textContent = '...';
     try {
-      const [nutrition, fresh, freezer, pantry, freshMeals, frozenMeals, mealPlan, deliveries] = await Promise.all([
+      const [nutrition, fresh, freezer, pantry, freshMeals, frozenMeals, deliveries] = await Promise.all([
         fetch('/api/nutrition/summary?period=today').then(r => r.json()),
         fetch('/api/inventory?location=fresh').then(r => r.json()),
         fetch('/api/inventory?location=freezer').then(r => r.json()),
         fetch('/api/inventory?location=pantry').then(r => r.json()),
         fetch('/api/meals?location=fresh').then(r => r.json()),
         fetch('/api/meals?location=freezer').then(r => r.json()),
-        fetch('/api/meal-plan').then(r => r.json()),
         fetch('/api/delivery-schedule').then(r => r.json()),
       ]);
       renderNutrition(nutrition);
@@ -323,12 +396,28 @@
       renderPanel('pantry',  pantry.ingredients  || []);
       renderFreshMeals(freshMeals.meals || []);
       renderMeals(frozenMeals.meals || []);
-      renderMealPlan(mealPlan.plans || []);
       renderDeliveries(deliveries.schedules || []);
     } catch (e) {
       console.error(e);
     }
     document.getElementById('refresh-btn').textContent = 'Refresh';
+    await loadWeekPlan();
+  }
+
+  async function loadWeekPlan() {
+    document.getElementById('week-plan-content').innerHTML = '<div class="loading">Loading...</div>';
+    const ws = toISODate(currentWeekStart);
+    const we = new Date(currentWeekStart);
+    we.setDate(we.getDate() + 6);
+    const startFmt = currentWeekStart.toLocaleDateString('en-GB', { day: 'numeric', month: 'short' });
+    const endFmt   = we.toLocaleDateString('en-GB', { day: 'numeric', month: 'short' });
+    document.getElementById('week-label').textContent = `${startFmt} – ${endFmt}`;
+    try {
+      const data = await fetch(`/api/week-plan?week_start=${ws}`).then(r => r.json());
+      renderWeekPlan(data);
+    } catch (e) {
+      document.getElementById('week-plan-content').innerHTML = '<div class="empty">Could not load week plan</div>';
+    }
   }
 
   function renderNutrition(data) {
@@ -432,40 +521,57 @@
       </div>`).join('');
   }
 
-  function renderMealPlan(plans) {
-    const el = document.getElementById('meal-plan-content');
-    if (!plans.length) {
-      el.innerHTML = '<div class="empty">No meals planned — ask the agent to plan something</div>';
-      return;
-    }
-    const DAYS = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
-    el.innerHTML = plans.map(p => {
-      const d = new Date(p.planned_date + 'T00:00:00');
-      const dayLabel = d.toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short' });
-      const allOk = p.all_in_stock;
-      const statusBadge = p.status !== 'planned'
-        ? `<span class="badge badge-tag">${p.status}</span>` : '';
-      const availBadge = allOk
-        ? '<span class="badge ing-ok">All in stock</span>'
-        : '<span class="badge badge-warn">Missing items</span>';
-      const chips = (p.ingredients || []).map(i =>
-        `<span class="ing-chip ${i.in_stock ? 'ing-ok' : 'ing-miss'}">${i.name}</span>`
-      ).join('');
-      return `<div class="plan-item">
-        <div class="plan-header">
-          <div>
-            <div class="plan-name">${p.name}</div>
-            <div style="display:flex;gap:5px;flex-wrap:wrap;margin-top:3px">
-              ${p.cuisine_tag ? `<span class="badge badge-tag">${p.cuisine_tag}</span>` : ''}
-              ${statusBadge}
-              ${availBadge}
-            </div>
-          </div>
-          <span class="plan-date">${dayLabel}</span>
-        </div>
-        ${chips ? `<div class="plan-ings">${chips}</div>` : ''}
-      </div>`;
-    }).join('');
+  function renderWeekPlan(data) {
+    const el = document.getElementById('week-plan-content');
+    const days = data.days || [];
+    const todayIso = toISODate(TODAY);
+    const hasAny = days.some(d => Object.keys(d.slots).length > 0);
+
+    el.innerHTML =
+      '<div class="week-grid">' +
+      '<div class="week-col-headers">' +
+        '<div></div>' +
+        '<div class="week-col-header">Midday</div>' +
+        '<div class="week-col-header">Dinner</div>' +
+      '</div>' +
+      days.map(day => {
+        const isToday = day.date === todayIso;
+        const d = new Date(day.date + 'T00:00:00');
+        const dayLabel = d.toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric' });
+        const midday = day.slots['lunch'] || day.slots['brunch'] || null;
+        const dinner = day.slots['dinner'] || null;
+        const middayType = day.slots['brunch'] ? 'Brunch' : 'Lunch';
+        return `<div class="week-row ${isToday ? 'is-today' : ''}">
+          <div class="week-day-label">${dayLabel}</div>
+          ${renderSlot(midday, middayType)}
+          ${renderSlot(dinner, 'Dinner')}
+        </div>`;
+      }).join('') +
+      '</div>' +
+      (!hasAny ? '<div class="empty" style="margin-top:12px">No meals planned — ask the agent to plan the week</div>' : '');
+  }
+
+  function renderSlot(plan, typeLabel) {
+    if (!plan) return '<div class="week-slot empty">—</div>';
+    const isEatingOut = plan.name === 'Eating out';
+    const statusBadge = plan.status === 'skipped'
+      ? '<span class="badge badge-skipped">Skipped</span>'
+      : plan.status === 'cooked'
+      ? '<span class="badge ing-ok">Cooked</span>'
+      : '';
+    const availBadge = isEatingOut ? '' : plan.all_in_stock
+      ? '<span class="badge ing-ok">✓ In stock</span>'
+      : '<span class="badge badge-warn">Missing items</span>';
+    const nameHtml = plan.source_url
+      ? `<a href="${plan.source_url}" target="_blank" rel="noopener">${plan.name}</a>`
+      : plan.name;
+    const cuisineBadge = plan.cuisine_tag && !isEatingOut
+      ? `<span class="badge badge-tag">${plan.cuisine_tag}</span>` : '';
+    return `<div class="week-slot">
+      <div class="week-slot-type">${typeLabel}</div>
+      <div class="week-slot-name">${nameHtml}</div>
+      <div class="week-slot-badges">${cuisineBadge}${statusBadge}${availBadge}</div>
+    </div>`;
   }
 
   function renderDeliveries(schedules) {

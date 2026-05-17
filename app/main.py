@@ -135,6 +135,13 @@ async def api_delivery_schedule(source_label: Optional[str] = Query(None)):
         return await get_delivery_schedule(session, source_label=source_label)
 
 
+@app.get("/api/week-plan")
+async def api_week_plan(week_start: Optional[str] = Query(None)):
+    from agent.tools import get_week_plan
+    async with AsyncSessionLocal() as session:
+        return await get_week_plan(session, week_start=week_start)
+
+
 @app.get("/api/meal-plan")
 async def api_meal_plan(
     from_date: Optional[str] = Query(None),
