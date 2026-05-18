@@ -165,6 +165,56 @@ async def api_shopping_list(week_start: Optional[str] = Query(None)):
         return await get_shopping_list(session, week_start=week_start)
 
 
+
+@app.post("/api/baskets")
+async def api_create_basket(name: str = Query(...)):
+    from agent.tools import create_basket
+    async with AsyncSessionLocal() as session:
+        return await create_basket(session, name=name)
+
+
+@app.get("/api/baskets")
+async def api_list_baskets():
+    from agent.tools import list_baskets
+    async with AsyncSessionLocal() as session:
+        return await list_baskets(session)
+
+
+@app.get("/api/baskets/{basket_id}/items")
+async def api_get_basket_items(basket_id: int):
+    from agent.tools import get_basket_items
+    async with AsyncSessionLocal() as session:
+        return await get_basket_items(session, basket_id=basket_id)
+
+
+@app.post("/api/baskets/{basket_id}/items")
+async def api_add_basket_item(basket_id: int, name: str = Query(...), quantity: float = Query(1.0), unit: str = Query("unit"), notes: Optional[str] = Query(None)):
+    from agent.tools import add_basket_item
+    async with AsyncSessionLocal() as session:
+        return await add_basket_item(session, basket_id=basket_id, name=name, quantity=quantity, unit=unit, notes=notes)
+
+
+@app.put("/api/baskets/items/{item_id}")
+async def api_update_basket_item(item_id: int, quantity: Optional[float] = Query(None), unit: Optional[str] = Query(None), notes: Optional[str] = Query(None)):
+    from agent.tools import update_basket_item_tool
+    async with AsyncSessionLocal() as session:
+        return await update_basket_item_tool(session, item_id=item_id, quantity=quantity, unit=unit, notes=notes)
+
+
+@app.delete("/api/baskets/items/{item_id}")
+async def api_remove_basket_item(item_id: int):
+    from agent.tools import remove_basket_item_tool
+    async with AsyncSessionLocal() as session:
+        return await remove_basket_item_tool(session, item_id=item_id)
+
+
+@app.get("/api/baskets/{basket_id}/required-ingredients")
+async def api_basket_required(basket_id: int):
+    from agent.tools import basket_required_ingredients
+    async with AsyncSessionLocal() as session:
+        return await basket_required_ingredients(session, basket_id=basket_id)
+
+
 # ---------------------------------------------------------------------------
 # Telegram webhook
 # ---------------------------------------------------------------------------

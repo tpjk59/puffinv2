@@ -17,6 +17,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 import sources.registry as registry
 from agent.prompts import RECIPE_PARSE_PROMPT
 from db import crud
+from db import crud as db_crud
 
 _anthropic_client = anthropic.AsyncAnthropic()
 _RECIPE_PARSE_MODEL = "claude-haiku-4-5-20251001"
@@ -754,6 +755,83 @@ async def get_shopping_list(
             })
 
     return {"shopping_list": shopping_list, "count": len(shopping_list)}
+
+
+async def create_basket(
+    session: AsyncSession,
+    name: str,
+) -> dict:
+    b = await db_crud.create_basket(session, name)
+    return {"basket": {"id": b.id, "name": b.name}}
+
+
+async def list_baskets(session: AsyncSession) -> dict:
+    bs = await db_crud.list_baskets(session)
+    return {"baskets": [{"id": b.id, "name": b.name} for b in bs]}
+
+
+async def get_basket_items(session: AsyncSession, basket_id: int) -> dict:
+    items = await db_crud.list_basket_items(session, basket_id)
+    return {"items": [
+        {"id": i.id, "name": i.name, "quantity": i.quantity, "unit": i.unit, "notes": i.notes}
+        for i in items
+    ]}
+
+
+async def add_basket_item(
+    session: AsyncSession,
+    basket_id: int,
+    name: str,
+    quantity: float,
+    unit: str = "unit",
+    notes: Optional[str] = None,
+) -> dict:
+    item = await db_crud.add_basket_item(session, basket_id, name, quantity, unit, notes)
+    return {"item": {"id": item.id, "name": item.name, "quantity": item.quantity, "unit": item.unit}}
+
+
+async def update_basket_item_tool(
+    session: AsyncSession,
+    item_id: int,
+    quantity: Optional[float] = None,
+    unit: Optional[str] = None,
+    notes: Optional[str] = None,
+) -> dict:
+    updates: dict[str, Any] = {}
+    if quantity is not None:
+        updates["quantity"] = quantity
+    if unit is not None:
+        updates["unit"] = unit
+    if notes is not None:
+        updates["notes"] = notes
+    item = await db_crud.update_basket_item(session, item_id, updates)
+    if item is None:
+        return {"error": "item not found"}
+    return {"item": {"id": item.id, "name": item.name, "quantity": item.quantity, "unit": item.unit}}
+
+
+async def remove_basket_item_tool(session: AsyncSession, item_id: int) -> dict:
+    ok = await db_crud.remove_basket_item(session, item_id)
+    return {"removed": item_id} if ok else {"error": "item not found"}
+
+
+async def basket_required_ingredients(session: AsyncSession, basket_id: int) -> dict:
+    """Return which ingredients from the basket are needed against current meal plans/shopping list.
+
+    This computes the shopping list for planned meals and then intersects with basket items by name.
+    """
+    shop = await get_shopping_list(session)
+    basket_items = await db_crud.list_basket_items(session, basket_id)
+    needed = {i["name"].lower(): i for i in shop.get("shopping_list", [])}
+    result = []
+    for bi in basket_items:
+        name = bi.name.lower()
+        if name in needed:
+            entry = needed[name].copy()
+            entry["basket_quantity"] = bi.quantity
+            entry["basket_unit"] = bi.unit
+            result.append(entry)
+    return {"matches": result}
 
 
 async def parse_recipe_from_url(session: AsyncSession, url: str) -> dict:

@@ -165,3 +165,28 @@ class DeliverySchedule(Base):
     expected_date: Mapped[date] = mapped_column(Date, nullable=False)
     scraped_at: Mapped[datetime] = mapped_column(DateTime, nullable=False)
     raw_json: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+
+
+class Basket(Base):
+    __tablename__ = "baskets"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    name: Mapped[str] = mapped_column(String(255), nullable=False, unique=True)
+    created_at: Mapped[date] = mapped_column(Date, nullable=False, default=lambda: date.today())
+
+    items: Mapped[list["BasketItem"]] = relationship(
+        "BasketItem", back_populates="basket", cascade="all, delete-orphan"
+    )
+
+
+class BasketItem(Base):
+    __tablename__ = "basket_items"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    basket_id: Mapped[int] = mapped_column(ForeignKey("baskets.id", ondelete="CASCADE"), nullable=False)
+    name: Mapped[str] = mapped_column(String(255), nullable=False)
+    quantity: Mapped[float] = mapped_column(Float, nullable=False, default=1.0)
+    unit: Mapped[str] = mapped_column(String(50), nullable=False, default="unit")
+    notes: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+
+    basket: Mapped["Basket"] = relationship("Basket", back_populates="items")

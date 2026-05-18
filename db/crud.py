@@ -8,6 +8,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from db.models import (
     DeliverySchedule,
+    Basket,
+    BasketItem,
     Ingredient,
     Meal,
     MealIngredient,
@@ -102,6 +104,87 @@ async def list_ingredients(
         )
     result = await session.execute(query)
     return list(result.scalars().all())
+
+
+# ---------------------------------------------------------------------------
+# Baskets
+# ---------------------------------------------------------------------------
+
+
+async def create_basket(session: AsyncSession, name: str) -> Basket:
+    b = Basket(name=name)
+    session.add(b)
+    await session.commit()
+    await session.refresh(b)
+    return b
+
+
+async def get_basket(session: AsyncSession, basket_id: int) -> Optional[Basket]:
+    result = await session.execute(select(Basket).where(Basket.id == basket_id))
+    return result.scalar_one_or_none()
+
+
+async def get_basket_by_name(session: AsyncSession, name: str) -> Optional[Basket]:
+    result = await session.execute(select(Basket).where(Basket.name == name))
+    return result.scalar_one_or_none()
+
+
+async def list_baskets(session: AsyncSession) -> list[Basket]:
+    result = await session.execute(select(Basket).order_by(Basket.name))
+    return list(result.scalars().all())
+
+
+async def delete_basket(session: AsyncSession, basket_id: int) -> bool:
+    b = await get_basket(session, basket_id)
+    if b is None:
+        return False
+    await session.delete(b)
+    await session.commit()
+    return True
+
+
+async def add_basket_item(
+    session: AsyncSession,
+    basket_id: int,
+    name: str,
+    quantity: float,
+    unit: str,
+    notes: Optional[str] = None,
+) -> BasketItem:
+    item = BasketItem(basket_id=basket_id, name=name, quantity=quantity, unit=unit, notes=notes)
+    session.add(item)
+    await session.commit()
+    await session.refresh(item)
+    return item
+
+
+async def list_basket_items(session: AsyncSession, basket_id: int) -> list[BasketItem]:
+    result = await session.execute(select(BasketItem).where(BasketItem.basket_id == basket_id))
+    return list(result.scalars().all())
+
+
+async def update_basket_item(
+    session: AsyncSession, item_id: int, updates: dict[str, Any]
+) -> Optional[BasketItem]:
+    result = await session.execute(select(BasketItem).where(BasketItem.id == item_id))
+    item = result.scalar_one_or_none()
+    if item is None:
+        return None
+    for k, v in updates.items():
+        setattr(item, k, v)
+    await session.commit()
+    await session.refresh(item)
+    return item
+
+
+async def remove_basket_item(session: AsyncSession, item_id: int) -> bool:
+    result = await session.execute(select(BasketItem).where(BasketItem.id == item_id))
+    item = result.scalar_one_or_none()
+    if item is None:
+        return False
+    await session.delete(item)
+    await session.commit()
+    return True
 
 
 async def update_ingredient(
